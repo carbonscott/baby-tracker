@@ -1,9 +1,9 @@
 # Baby tracker
 
 A tiny, single-user baby log: feeds, diapers, sleep, plus custom activities (outdoors, bath,
-vitamin D, ...), and logging from a photo with Claude. One Python server, one HTML page, one
-SQLite file. Built to be fast to use one-handed at 3 a.m. and easy for another program to
-analyze later.
+vitamin D, ...). Claude can fill in entries from a photo or a sentence, and answer questions
+about the log. One Python server, one HTML page, one SQLite file. Built to be fast to use
+one-handed at 3 a.m. and easy for another program to analyze later.
 
 <p align="center">
   <img src="docs/screenshots/home.png" width="250" alt="Home screen: running feed timer, quick tiles, last-24h summary, timeline">
@@ -21,26 +21,41 @@ by Vyacheslav Argenberg, <a href="https://creativecommons.org/licenses/by/4.0/">
 - **Data:** `data/baby.db` (SQLite). Daily snapshots in `data/backups/` (last 90 kept).
 - **Service:** `sudo systemctl status baby-tracker` · logs: `journalctl -u baby-tracker -f`
 
-## Log from a photo (Claude)
+## Claude features
 
-Tap **📷 Log from a photo**, take or pick a photo, and Claude suggests one of: feeding,
-sleeping, playing, diaper change, tummy time, bath, other. Tap **Next** to open the normal
-entry screen prefilled; nothing is saved until you confirm there. Typical answer: 3–5 s.
+Three ways to let Claude do the typing. Claude only **proposes**; nothing is saved until you
+tap Save on the review screen, and every proposal can be edited there first.
 
-How it works: the browser shrinks the photo to 1024 px JPEG → `POST /api/photo/classify` →
-`photo_ai.py` re-encodes it (drops EXIF/location) → the **Claude Agent SDK** runs the
-installed, unmodified **Claude Code** (`~/.local/bin/claude`) with model `haiku`, one turn,
-no tools, a classifier system prompt, and none of your personal Claude Code settings →
-strict JSON `{activity, confidence, notes}`, validated, falling back to `other`.
+| Button | You | Claude |
+|---|---|---|
+| **📷 Photo** | Take or pick a photo | Proposes the finished entry: breast or bottle, formula or breast milk, ml read off the bottle's markings, pee/poop with stool color and texture, where the baby is (crib, car seat, play mat, ...), and a note on what the baby is doing. The photo's capture time is the entry time. |
+| **✨ Claude → Log it** | Type or dictate (keyboard mic): "4 oz formula at 3, then she slept till 5 and had a poopy diaper" | Proposes all the entries, or edits to existing ones ("she woke up at 4:10", "the last feed was the right side") |
+| **✨ Claude → Ask** | "When did she last poop?", "Is she eating more than last week?", "Summary for the 2-month checkup" | Queries the log itself (read-only) and answers, or writes a short report |
+
+Claude sees the last ~48 h of the log, so it picks the right action: a photo of the baby awake
+while a nap timer runs proposes ending the nap at the photo's time; a photo of the baby asleep
+starts one. It never invents amounts or durations: if it can't tell how long something lasted,
+the review screen asks you. For pale/white, red, or black stool the review screen shows a short
+line suggesting a check with your pediatrician (stool-color-card guidance); it makes no other
+health judgments.
+
+How it works: the browser shrinks a photo to 1024 px JPEG and reads its capture time →
+`POST /api/ai/propose` (photo and/or text) → `propose_ai.py` re-encodes the photo (drops
+EXIF/location) and adds the recent log as text → the **Claude Agent SDK** runs the installed,
+unmodified **Claude Code** (`~/.local/bin/claude`) with no built-in tools, none of your personal
+Claude Code settings, and a JSON schema for the answer → the server checks every proposed entry
+with the same validation as a manual entry. `POST /api/ai/ask` → `ask_ai.py` copies the log into
+an in-memory database and gives Claude Code one read-only `sql` tool on that copy; it never sees
+the database file. Shared plumbing is in `claude_ai.py`.
 
 **Privacy.** Photos are never written to this VM's disk: they live in memory for the few
 seconds of the request. Claude Code runs with `--no-session-persistence` (no transcript) and
-with telemetry, error reports, and prompt history off. Saved entries only record what Claude
-suggested (`data.photo`); for "Other", Claude's short description is prefilled into the note,
-which you can clear before saving. The app never reads, stores, or forwards your Claude login;
-Claude Code handles its own sign-in.
+with telemetry, error reports, and prompt history off. Besides the photo or text, Claude
+receives log entries as text: the last ~48 h for proposals, and whatever its queries return for
+questions. Saved entries record that Claude proposed them (`data.ai`). The app never reads,
+stores, or forwards your Claude login; Claude Code handles its own sign-in.
 
-**On Anthropic's side**, each photo is handled like any Claude Code request from your account
+**On Anthropic's side**, each request is handled like any Claude Code request from your account
 ([data usage](https://code.claude.com/docs/en/data-usage)): with your subscription it is kept
 30 days, or 5 years and used for training if "Help improve Claude" is on (check
 [claude.ai/settings/data-privacy-controls](https://claude.ai/settings/data-privacy-controls)).
@@ -66,11 +81,11 @@ sudo cp deploy/baby-tracker.service /etc/systemd/system/ && sudo systemctl daemo
 
 ### Sign in, check, and renew the Claude login
 
-The classifier uses Claude Code's own sign-in for your account (subscription usage).
+The Claude features use Claude Code's own sign-in for your account (subscription usage).
 
 ```bash
 claude auth status      # "loggedIn": true, your email, and the plan
-claude auth login       # sign in, or renew when photos say "login is missing or expired"
+claude auth login       # sign in, or renew when the app says "login is missing or expired"
 ```
 
 `claude auth login` prints a link. Open it on your phone or laptop, sign in to Claude, and if
@@ -99,8 +114,9 @@ Claude Code prefers `ANTHROPIC_API_KEY` over the subscription login when it is s
    (Editing the file keeps the key out of your shell history.)
    To go back to the subscription, delete that line (or file) and restart.
 
-Optional knobs (same env file): `BABY_PHOTO_MODEL` (default `haiku`),
-`BABY_PHOTO_TIMEOUT` (seconds, default 30).
+Optional knobs (same env file): `BABY_AI_MODEL` for photo/text proposals (default `sonnet`;
+the old `BABY_PHOTO_MODEL` still works), `BABY_AI_TIMEOUT` (seconds, default 45),
+`BABY_ASK_MODEL` for questions (default `sonnet`), `BABY_ASK_TIMEOUT` (seconds, default 120).
 
 ### Troubleshooting
 
@@ -108,7 +124,7 @@ Optional knobs (same env file): `BABY_PHOTO_MODEL` (default `haiku`),
 |---|---|
 | Claude login is missing or expired | `claude auth login` on the VM (above) |
 | Photo AI isn't set up on the server | Run the server with `.venv/bin/python` (Setup above) |
-| Claude didn't answer within 30 s | Retry; check `journalctl -u baby-tracker` |
+| Claude didn't answer within 45 s (or 120 s) | Retry; check `journalctl -u baby-tracker` |
 | Claude usage limit reached | Wait for the plan limit to reset, or switch to API credits |
 
 ## Files
