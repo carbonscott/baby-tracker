@@ -733,8 +733,10 @@ def propose(*, text: str | None, jpeg: bytes | None, photo_taken_at: dt.datetime
               activity_names=activity_names, baby_name=baby_name, unit=unit)
     content = [claude_ai.image_block(jpeg)] if jpeg is not None else []
     content.append(claude_ai.text_block(build_context(ctx, text)))
+    # max_turns=3: a structured answer is usually one turn, but Claude Code sometimes needs another
+    # to resubmit it (1 failed ~1 in 38 eval runs with "Reached maximum number of turns").
     r = claude_ai.run_claude(content, system_prompt=SYSTEM_PROMPT, model=MODEL, timeout_s=TIMEOUT_S,
-                             output_schema=OUTPUT_SCHEMA, effort=EFFORT)
+                             max_turns=3, output_schema=OUTPUT_SCHEMA, effort=EFFORT)
     out = r.structured if isinstance(r.structured, dict) else {}
     items = out.get("items") if isinstance(out.get("items"), list) else []
     changes = []

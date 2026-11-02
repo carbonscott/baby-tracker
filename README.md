@@ -6,16 +6,20 @@ about the log. One Python server, one HTML page, one SQLite file. Built to be fa
 one-handed at 3 a.m. and easy for another program to analyze later.
 
 <p align="center">
-  <img src="docs/screenshots/home.png" width="250" alt="Home screen: running feed timer, quick tiles, last-24h summary, timeline">
+  <img src="docs/screenshots/home.png" width="190" alt="Home screen: quick tiles, Photo and Claude buttons, last-24h summary, timeline with entries Claude filled in">
   &nbsp;
-  <img src="docs/screenshots/photo.png" width="250" alt="Log from a photo: Claude suggests Feeding, 97% sure">
+  <img src="docs/screenshots/photo.png" width="190" alt="From a photo: Claude proposes a finished bottle entry with place and note, ready to save">
   &nbsp;
-  <img src="docs/screenshots/feed.png" width="250" alt="Feed sheet: side, timer or already done, quick time chips">
+  <img src="docs/screenshots/text.png" width="190" alt="Tell Claude: one sentence becomes two proposed entries, Save 2">
+  &nbsp;
+  <img src="docs/screenshots/ask.png" width="190" alt="Ask your log: when did Mia last poop, and a follow-up">
 </p>
-<p align="center"><sub>Demo data. Photo in the middle screenshot: "Baby and baby milk bottle, Baby feeding, Moscow, Russia"
-by Vyacheslav Argenberg, <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>, via
-<a href="https://commons.wikimedia.org/wiki/File:Baby_and_baby_milk_bottle,_Baby_feeding,_Moscow,_Russia.jpg">Wikimedia Commons</a>
-(resized, shown inside an app screenshot).</sub></p>
+<p align="center"><sub>Demo data. Photos in the screenshots, all via Wikimedia Commons, resized and shown inside app screenshots:
+"<a href="https://commons.wikimedia.org/wiki/File:Baby_and_baby_milk_bottle,_Baby_feeding,_Moscow,_Russia.jpg">Baby and baby milk bottle, Baby feeding, Moscow, Russia</a>"
+and "<a href="https://commons.wikimedia.org/wiki/File:Sleeping_baby,_Moscow,_Russia.jpg">Sleeping baby, Moscow, Russia</a>"
+by Vyacheslav Argenberg, <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>;
+"<a href="https://commons.wikimedia.org/wiki/File:Baby_on_mat.jpg">Baby on mat</a>" by 4455out,
+<a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>.</sub></p>
 
 - **App URL:** `https://<your-vm>.exe.xyz:8420/` on an [exe.dev](https://exe.dev) VM (private: needs an exe.dev login with access to the VM). Keep it private; don't run `share set-public`.
 - **Data:** `data/baby.db` (SQLite). Daily snapshots in `data/backups/` (last 90 kept).
@@ -31,6 +35,10 @@ tap Save on the review screen, and every proposal can be edited there first.
 | **📷 Photo** | Take or pick a photo | Proposes the finished entry: breast or bottle, formula or breast milk, ml read off the bottle's markings, pee/poop with stool color and texture, where the baby is (crib, car seat, play mat, ...), and a note on what the baby is doing. The photo's capture time is the entry time. |
 | **✨ Claude → Log it** | Type or dictate (keyboard mic): "4 oz formula at 3, then she slept till 5 and had a poopy diaper" | Proposes all the entries, or edits to existing ones ("she woke up at 4:10", "the last feed was the right side") |
 | **✨ Claude → Ask** | "When did she last poop?", "Is she eating more than last week?", "Summary for the 2-month checkup" | Queries the log itself (read-only) and answers, or writes a short report |
+
+More screenshots: [ending a nap from a photo](docs/screenshots/nap.png), [an old photo that needs a
+duration](docs/screenshots/duration.png), [fixing an entry by text](docs/screenshots/fix.png), [a summary
+for the doctor](docs/screenshots/report.png), [the feed sheet](docs/screenshots/feed.png).
 
 Claude sees the last ~48 h of the log, so it picks the right action: a photo of the baby awake
 while a nap timer runs proposes ending the nap at the photo's time; a photo of the baby asleep
