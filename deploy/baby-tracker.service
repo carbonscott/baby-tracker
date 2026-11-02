@@ -1,0 +1,21 @@
+[Unit]
+Description=Baby tracker (tiny feed/diaper/sleep log)
+After=network.target
+
+[Service]
+User=exedev
+WorkingDirectory=/home/exedev/projects/baby-tracker
+# The project venv has the Claude Agent SDK + Pillow for photo classification.
+ExecStart=/home/exedev/projects/baby-tracker/.venv/bin/python /home/exedev/projects/baby-tracker/server.py
+Environment=PORT=8420
+Environment=PYTHONUNBUFFERED=1
+# Claude Code lives in ~/.local/bin and uses your own `claude auth login` (stored by Claude Code itself).
+Environment=PATH=/home/exedev/.local/bin:/usr/local/bin:/usr/bin:/bin
+# Optional, to use API credits instead of the subscription: put ANTHROPIC_API_KEY=... in this file (chmod 600).
+# Never put CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_AUTH_TOKEN here: the subscription login stays in Claude Code's own store.
+EnvironmentFile=-/home/exedev/.config/baby-tracker/env
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,1037 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f1216">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Baby">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<title>Baby tracker</title>
+<style>
+  :root {
+    --bg: #0f1216; --card: #181c22; --card2: #222830; --line: #333a44;
+    --text: #e8eaed; --muted: #8d96a0;
+    --feed: #f0a04b; --diaper: #3fb9a3; --sleep: #9b8cf5; --activity: #e98ac0; --danger: #ef6461;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); }
+  body {
+    font: 16px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    padding: env(safe-area-inset-top) 0 calc(env(safe-area-inset-bottom) + 24px);
+  }
+  button, input { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  .hidden { display: none !important; }
+  .feed { --c: var(--feed); } .diaper { --c: var(--diaper); } .sleep { --c: var(--sleep); } .activity { --c: var(--activity); }
+
+  header { max-width: 560px; margin: 0 auto; display: flex; align-items: center; justify-content: space-between; padding: 14px 16px 4px; }
+  h1 { font-size: 20px; margin: 0; }
+  .icon-btn { background: none; border: 0; color: var(--muted); font-size: 22px; padding: 6px 8px; }
+  main { max-width: 560px; margin: 0 auto; padding: 0 12px; }
+
+  /* running timers */
+  .banner { display: flex; align-items: center; gap: 8px; margin: 8px 0; padding: 10px 10px 10px 14px;
+    border-radius: 16px; border: 1px solid color-mix(in srgb, var(--c) 55%, transparent);
+    background: color-mix(in srgb, var(--c) 16%, var(--card)); }
+  .banner .b-main { flex: 1; min-width: 0; cursor: pointer; }
+  .banner .b-title { font-size: 14px; font-weight: 600; color: var(--c); }
+  .banner .b-timer { font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums; }
+
+  /* tiles */
+  .tiles { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin: 8px 0 10px; }
+  .tile { display: flex; flex-direction: column; gap: 2px; min-height: 108px; padding: 12px; text-align: left;
+    background: var(--card); border: 0; border-top: 4px solid var(--c); border-radius: 16px; transition: transform .08s; }
+  .tile:active { transform: scale(.97); background: var(--card2); }
+  .tile.running { background: color-mix(in srgb, var(--c) 22%, var(--card)); }
+  .tile-top { display: flex; align-items: center; gap: 6px; }
+  .tile .emoji { font-size: 22px; }
+  .tile .label { font-weight: 700; color: var(--c); }
+  .tile .big { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; margin-top: auto; }
+  .tile .sub { font-size: 13px; color: var(--muted); }
+
+  .summary { display: flex; flex-wrap: wrap; gap: 6px; font-size: 13px; color: var(--muted); }
+  .pill { background: var(--card); border-radius: 999px; padding: 4px 10px; }
+  .pill b { color: var(--text); }
+  .pill.head { background: none; padding-left: 2px; }
+
+  /* timeline */
+  .day { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; margin: 20px 4px 8px; font-size: 13px; color: var(--muted); }
+  .day b { color: var(--text); font-size: 14px; }
+  .row { display: flex; align-items: center; gap: 10px; width: 100%; margin-bottom: 6px; padding: 10px 12px; text-align: left;
+    background: var(--card); border: 0; border-radius: 12px; }
+  .row:active { background: var(--card2); }
+  .row .time { flex: none; width: 74px; color: var(--muted); font-size: 14px; font-variant-numeric: tabular-nums; }
+  .row .dot { flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--c); }
+  .row .desc { flex: 1; min-width: 0; }
+  .row .sub { font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
+  .row .dur { flex: none; color: var(--muted); font-size: 14px; font-variant-numeric: tabular-nums; }
+  .live { color: var(--c); font-weight: 600; }
+  .empty { color: var(--muted); text-align: center; margin: 32px 0; }
+  .ghost { display: block; margin: 18px auto; padding: 10px 16px; background: none; border: 1px solid var(--line); border-radius: 10px; color: var(--muted); }
+
+  /* bottom sheet */
+  .sheet { position: fixed; inset: 0; z-index: 10; }
+  .backdrop { position: absolute; inset: 0; background: rgba(0, 0, 0, .6); }
+  .panel { position: absolute; left: 0; right: 0; bottom: 0; max-width: 560px; max-height: 92vh; margin: 0 auto; overflow: auto;
+    padding: 16px 16px calc(16px + env(safe-area-inset-bottom)); background: var(--card); border-radius: 20px 20px 0 0; }
+  .panel-head { display: flex; align-items: center; justify-content: space-between; }
+  .panel h2 { margin: 0; font-size: 21px; color: var(--c, var(--text)); }
+  .field { margin: 14px 0; }
+  .field > label { display: block; margin-bottom: 6px; font-size: 13px; color: var(--muted); }
+  .hint { margin-top: 6px; font-size: 13px; color: var(--muted); }
+  .hint.warn { color: var(--danger); }
+  .seg { display: flex; gap: 4px; padding: 4px; background: var(--bg); border-radius: 12px; }
+  .seg button { flex: 1; padding: 12px 4px; background: none; border: 0; border-radius: 9px; font-weight: 600; }
+  .seg button.on { background: var(--c, #6ea0f7); color: #111; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+  .chip { padding: 8px 12px; background: none; border: 1px solid var(--line); border-radius: 999px; font-size: 14px; text-decoration: none; color: var(--text); }
+  .chip.on { background: var(--c, #6ea0f7); border-color: transparent; color: #111; font-weight: 600; }
+  input.txt, input.dt, input.num { width: 100%; padding: 12px; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; font-size: 16px; }
+  input.dt { min-height: 48px; }
+  .btn { padding: 12px 14px; background: var(--card2); border: 0; border-radius: 12px; font-weight: 600; }
+  .btn.primary { background: var(--c, #6ea0f7); color: #111; }
+  .btn.danger { background: none; border: 1px solid var(--danger); color: var(--danger); }
+  .actions-row { display: flex; gap: 8px; margin-top: 18px; }
+  .actions-row .btn { flex: 1; padding: 16px; font-size: 17px; }
+  .diaper-btns { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 18px; }
+  .diaper-btns .btn { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 20px 6px; font-size: 17px;
+    background: color-mix(in srgb, var(--diaper) 20%, var(--card2)); }
+  .diaper-btns .e { font-size: 26px; }
+  .linkish { background: none; border: 0; padding: 0; color: #7fb2ff; font-size: 13px; }
+
+  .toast { position: fixed; left: 12px; right: 12px; bottom: calc(20px + env(safe-area-inset-bottom)); z-index: 20;
+    width: fit-content; max-width: 536px; margin: 0 auto;
+    display: flex; align-items: center; gap: 16px; padding: 12px 16px;
+    background: #2c323b; border-radius: 12px; box-shadow: 0 6px 24px rgba(0, 0, 0, .45); }
+  .toast .link { background: none; border: 0; color: #7fb2ff; font-weight: 700; }
+
+  /* photo -> suggested entry */
+  .photo-btn { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; margin: 0 0 12px; padding: 14px;
+    background: var(--card); border: 1px dashed var(--line); border-radius: 16px; font-weight: 600; cursor: pointer; }
+  .photo-btn:active { background: var(--card2); }
+  .visually-hidden { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; pointer-events: none; }
+  .photo { display: block; width: 100%; max-height: 260px; margin-top: 10px; object-fit: contain; background: #000; border-radius: 14px; }
+  .ai-box { margin-top: 12px; }
+  .ai-title { font-size: 18px; font-weight: 700; }
+  .ai-title.warn { font-size: 15px; color: var(--danger); }
+  .ai-conf { font-size: 14px; font-weight: 600; color: var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="title">Baby tracker</h1>
+  <button id="settingsBtn" class="icon-btn" aria-label="Settings">⚙︎</button>
+</header>
+<main>
+  <section id="ongoing"></section>
+  <section id="tiles" class="tiles"></section>
+  <label class="photo-btn" for="photoInput">📷 Log from a photo</label>
+  <input id="photoInput" class="visually-hidden" type="file" accept="image/*">
+  <section id="summary" class="summary"></section>
+  <section id="timeline"><p class="empty">Loading…</p></section>
+  <button id="more" class="ghost hidden">Show older entries</button>
+</main>
+<div id="sheet" class="sheet hidden"></div>
+<div id="toast" class="toast hidden"></div>
+
+<script>
+'use strict';
+
+// ---------- settings & state ----------
+const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
+const ML_PER_OZ = 29.5735;
+const SESSION_GAP_MS = 15 * 60e3;   // feeds closer than this count as one feeding session
+const settings = Object.assign({ unit: 'ml', name: '' }, safeJSON(localStorage.getItem('bt.settings')));
+let events = [];                     // newest first
+let knownActivities = [];            // activity names, most recently used first (from the server)
+// Starter suggestions for the Activity sheet, with the logging style each usually needs.
+const DEFAULT_ACTIVITIES = [['Outdoors', 'timer'], ['Tummy time', 'timer'], ['Bath', 'point'], ['Vitamin D', 'point']];
+let windowDays = 7;
+let busy = false;
+let pendingPhoto = null;   // {suggested, confidence}: attached to the entry saved after a photo suggestion
+let sheetCleanup = null;   // run when the open sheet closes (e.g. free the photo preview)
+let sheetOpenedAt = 0;     // taps right after a sheet opens are the 2nd half of a double tap
+
+function safeJSON(s) { try { return JSON.parse(s) || {}; } catch { return {}; } }
+function saveSettings() { localStorage.setItem('bt.settings', JSON.stringify(settings)); }
+
+// ---------- tiny DOM helper ----------
+const $ = (sel) => document.querySelector(sel);
+function h(tag, attrs, ...kids) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v == null || v === false) continue;
+    if (k === 'class') el.className = v;
+    else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
+    else el.setAttribute(k, v === true ? '' : v);
+  }
+  for (const kid of kids.flat()) {
+    if (kid == null || kid === false) continue;
+    el.append(kid instanceof Node ? kid : document.createTextNode(String(kid)));
+  }
+  return el;
+}
+const field = (label, ...kids) => h('div', { class: 'field' }, label ? h('label', {}, label) : null, ...kids);
+
+// ---------- formatting ----------
+const pad = (n) => String(n).padStart(2, '0');
+const ms = (iso) => (iso ? Date.parse(iso) : null);
+const endMs = (e) => (e.end_at ? ms(e.end_at) : Date.now());
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+function fmtDur(t) {
+  if (t <= 0) return '0m';
+  const m = Math.floor(t / 60e3);
+  if (m < 1) return '<1m';
+  if (m < 60) return `${m}m`;
+  const hh = Math.floor(m / 60);
+  if (hh < 48) return `${hh}h ${pad(m % 60)}m`;
+  return `${Math.floor(hh / 24)}d ${hh % 24}h`;
+}
+function fmtClock(t) {
+  const s = Math.max(0, Math.floor(t / 1000));
+  const hh = Math.floor(s / 3600), mm = Math.floor((s % 3600) / 60), ss = s % 60;
+  return hh ? `${hh}h ${pad(mm)}m ${pad(ss)}s` : `${mm}m ${pad(ss)}s`;
+}
+const fmtTime = (t) => new Date(t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+function fmtAmount(ml) {
+  if (ml == null) return '';
+  return settings.unit === 'oz' ? `${+(ml / ML_PER_OZ).toFixed(1)} oz` : `${Math.round(ml)} ml`;
+}
+const toLocalInput = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+// 'YYYY-MM-DDTHH:MM' -> Date in the phone's local time (parsed by hand so no browser can read it as UTC)
+function fromLocalInput(s) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(s || '');
+  return m ? new Date(+m[1], m[2] - 1, +m[3], +m[4], +m[5]) : null;
+}
+// A time that lands in the future almost always means "the last time it was that o'clock",
+// e.g. entering 11 PM in the morning to backfill last night. Move it back one day in that case.
+function resolvePast(d) {
+  if (!d || isNaN(d) || d.getTime() <= Date.now() + 60e3) return d;
+  const prev = new Date(d);
+  prev.setDate(prev.getDate() - 1);
+  return prev.getTime() <= Date.now() + 60e3 ? prev : d;
+}
+const dayKey = (t) => { const d = new Date(t); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
+function dayBounds(k) { const [y, m, d] = k.split('-').map(Number); return [new Date(y, m - 1, d).getTime(), new Date(y, m - 1, d + 1).getTime()]; }
+function dayLabel(k) {
+  const y = new Date(); y.setDate(y.getDate() - 1);
+  if (k === dayKey(Date.now())) return 'Today';
+  if (k === dayKey(y)) return 'Yesterday';
+  return new Date(dayBounds(k)[0]).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+}
+
+// "Yesterday, 11:00 PM · 11h 06m ago": shown under time boxes so the chosen day is never a surprise
+function whenText(d) {
+  if (!d || isNaN(d)) return '';
+  const diff = Date.now() - d.getTime();
+  if (diff < -60e3) return 'In the future: check the date';
+  return `${dayLabel(dayKey(d.getTime()))}, ${fmtTime(d)} · ${diff < 60e3 ? 'just now' : fmtDur(diff) + ' ago'}`;
+}
+// Suffix for toasts when an entry was logged for an earlier time: " · Yesterday 11:00 PM"
+function atText(iso) {
+  const t = ms(iso);
+  if (Date.now() - t < 120e3) return '';
+  const k = dayKey(t);
+  return ` · ${k === dayKey(Date.now()) ? '' : dayLabel(k) + ' '}${fmtTime(t)}`;
+}
+
+const SIDE = { left: 'Left', right: 'Right', both: 'Both sides' };
+const SIDE_SHORT = { left: 'L', right: 'R', both: 'L+R' };
+const MILK = { breastmilk: 'Breast milk', formula: 'Formula' };
+const diaperText = (d) => (d.pee && d.poop ? 'Pee + poop' : d.poop ? 'Poop' : d.pee ? 'Pee' : 'Dry');
+// Point events have no duration: diapers, bottles, and activities logged as a single moment.
+const isPoint = (e) => e.kind === 'diaper' || (e.kind === 'feed' && e.data.method === 'bottle')
+  || (e.kind === 'activity' && e.end_at != null && e.end_at === e.start_at);
+const cleanName = (s) => String(s || '').trim().replace(/\s+/g, ' ');
+const sameName = (a, b) => cleanName(a).toLowerCase() === cleanName(b).toLowerCase();
+const runningActivities = () => events.filter((e) => e.kind === 'activity' && e.end_at == null);
+
+function describe(e) {
+  if (e.kind === 'feed') {
+    if (e.data.method === 'bottle') {
+      return ['Bottle', MILK[e.data.milk], e.data.amount_ml != null ? fmtAmount(e.data.amount_ml) : null].filter(Boolean).join(' · ');
+    }
+    return `Breast · ${SIDE[e.data.side] || '?'}`;
+  }
+  if (e.kind === 'diaper') return `Diaper · ${diaperText(e.data)}`;
+  if (e.kind === 'activity') return e.data.name;
+  return 'Sleep';
+}
+function shortFeed(e) {
+  if (e.data.method === 'bottle') return e.data.amount_ml != null ? fmtAmount(e.data.amount_ml) : 'Bottle';
+  return `${SIDE_SHORT[e.data.side] || '?'} ${fmtDur(endMs(e) - ms(e.start_at))}`;
+}
+
+// ---------- derived data ----------
+const ongoing = (kind) => events.find((e) => e.kind === kind && e.end_at == null);
+const overlap = (e, a, b) => Math.max(0, Math.min(endMs(e), b, Date.now()) - Math.max(ms(e.start_at), a));
+
+// Group feeds that follow each other closely (e.g. left then right, or breast then top-up bottle).
+function feedSessions() {
+  const sessions = [];
+  for (const f of events.filter((e) => e.kind === 'feed').reverse()) {
+    const last = sessions[sessions.length - 1];
+    if (last && ms(f.start_at) - Math.max(...last.items.map(endMs)) <= SESSION_GAP_MS) last.items.push(f);
+    else sessions.push({ start: ms(f.start_at), items: [f] });
+  }
+  return sessions; // oldest first
+}
+// Alternate the starting breast: suggest the side the last breast session did NOT start on.
+function suggestedSide() {
+  const sessions = feedSessions();
+  for (let i = sessions.length - 1; i >= 0; i--) {
+    const first = sessions[i].items.find((x) => x.data.method === 'breast');
+    if (first) return { left: 'right', right: 'left' }[first.data.side] || null;
+  }
+  return null;
+}
+
+// ---------- API ----------
+async function api(method, path, body) {
+  let res;
+  try {
+    const raw = body instanceof Blob;   // photos go up as raw image bytes
+    res = await fetch(path, {
+      method, credentials: 'same-origin',
+      headers: raw ? { 'Content-Type': body.type || 'image/jpeg' } : body ? { 'Content-Type': 'application/json' } : {},
+      body: raw ? body : body ? JSON.stringify(body) : undefined,
+    });
+  } catch {
+    throw new Error("Can't reach the server (offline or logged out?)");
+  }
+  const text = await res.text();
+  let json;
+  try { json = JSON.parse(text); } catch { throw new Error('Unexpected response. Try reloading the page.'); }
+  if (!res.ok) throw new Error(json.error || res.statusText);
+  return json;
+}
+const post = (body) => api('POST', '/api/events', {
+  ...body, tz: TZ, ...(pendingPhoto ? { data: { ...(body.data || {}), photo: pendingPhoto } } : {}),
+});
+const patch = (id, body) => api('PATCH', `/api/events/${id}`, body);
+const del = (id) => api('DELETE', `/api/events/${id}`);
+
+async function load() {
+  const since = new Date(Date.now() - windowDays * 864e5).toISOString();
+  try {
+    [events, knownActivities] = await Promise.all([
+      api('GET', `/api/events?since=${encodeURIComponent(since)}`),
+      api('GET', '/api/activity-names'),
+    ]);
+  } catch (e) {
+    toast(e.message);
+    return;
+  }
+  renderAll();
+}
+
+// Run a change: guard against double taps, refresh, then show a toast with optional Undo.
+async function run(fn, msg, undo) {
+  if (busy) return;
+  if (sheetOpen() && Date.now() - sheetOpenedAt < 400) return;   // a double tap must not save
+  busy = true;
+  try {
+    let r;
+    try { r = await fn(); } catch (e) { toast(e.message || String(e)); return; }
+    closeSheet();
+    await load();
+    if (msg) toast(typeof msg === 'function' ? msg(r) : msg, undo ? () => undo(r) : null);
+    return r;
+  } finally {
+    busy = false;
+  }
+}
+function checkPast(d) {
+  if (!d || isNaN(d)) throw new Error('Pick a valid time');
+  if (d.getTime() > Date.now() + 60e3) throw new Error("That's in the future. Check the date.");
+}
+
+async function startTimer(kind, data, start, note) {
+  // One running timer per kind (per name for activities, so "Outdoors" and "Tummy time" can overlap).
+  const prev = events.find((e) => e.kind === kind && e.end_at == null && (kind !== 'activity' || sameName(e.data.name, data.name)));
+  if (prev) {
+    const end = Math.max(ms(prev.start_at), Math.min(Date.now(), start.getTime()));
+    await patch(prev.id, { end_at: new Date(end).toISOString() });
+  }
+  return post({ kind, start_at: start.toISOString(), data, note });
+}
+function stopEvent(e) {
+  return run(() => patch(e.id, { end_at: new Date().toISOString() }),
+    (r) => `${{ sleep: 'Woke up', feed: 'Feed done' }[e.kind] || `${e.data.name} done`} · ${fmtDur(ms(r.end_at) - ms(r.start_at))}`,
+    (r) => patch(r.id, { end_at: null }));
+}
+function switchSide(f) {
+  const next = f.data.side === 'left' ? 'right' : 'left';
+  return run(async () => {
+    const now = new Date().toISOString();
+    await patch(f.id, { end_at: now });
+    return post({ kind: 'feed', start_at: now, data: { method: 'breast', side: next } });
+  }, `Switched to ${next} side`, async (r) => { await del(r.id); await patch(f.id, { end_at: null }); });
+}
+
+// ---------- rendering ----------
+function renderAll() {
+  const name = settings.name.trim();
+  $('#title').textContent = name || 'Baby tracker';
+  document.title = name ? `${name} · tracker` : 'Baby tracker';
+  renderBanners();
+  renderTiles();
+  renderSummary();
+  renderTimeline();
+}
+
+function renderBanners() {
+  const out = [];
+  const f = ongoing('feed');
+  if (f) out.push(h('div', { class: 'banner feed' },
+    h('div', { class: 'b-main', onclick: () => openEdit(f) },
+      h('div', { class: 'b-title' }, `Feeding · ${SIDE[f.data.side] || ''}`),
+      h('div', { class: 'b-timer', 'data-clock': ms(f.start_at) }, fmtClock(Date.now() - ms(f.start_at)))),
+    f.data.side !== 'both' ? h('button', { class: 'btn', onclick: () => switchSide(f) }, 'Switch side') : null,
+    h('button', { class: 'btn primary', onclick: () => stopEvent(f) }, 'Stop')));
+  const s = ongoing('sleep');
+  if (s) out.push(h('div', { class: 'banner sleep' },
+    h('div', { class: 'b-main', onclick: () => openEdit(s) },
+      h('div', { class: 'b-title' }, `Sleeping since ${fmtTime(ms(s.start_at))}`),
+      h('div', { class: 'b-timer', 'data-clock': ms(s.start_at) }, fmtClock(Date.now() - ms(s.start_at)))),
+    h('button', { class: 'btn primary', onclick: () => stopEvent(s) }, 'Woke up')));
+  for (const a of runningActivities()) out.push(h('div', { class: 'banner activity' },
+    h('div', { class: 'b-main', onclick: () => openEdit(a) },
+      h('div', { class: 'b-title' }, `${a.data.name} · since ${fmtTime(ms(a.start_at))}`),
+      h('div', { class: 'b-timer', 'data-clock': ms(a.start_at) }, fmtClock(Date.now() - ms(a.start_at)))),
+    h('button', { class: 'btn primary', onclick: () => stopEvent(a) }, 'Stop')));
+  $('#ongoing').replaceChildren(...out);
+}
+
+function tile(cls, emoji, label, big, sub, onclick) {
+  return h('button', { class: `tile ${cls}`, onclick },
+    h('div', { class: 'tile-top' }, h('span', { class: 'emoji' }, emoji), h('span', { class: 'label' }, label)),
+    h('div', { class: 'big' }, big),
+    h('div', { class: 'sub' }, sub));
+}
+function renderTiles() {
+  const now = Date.now();
+  const since = (t) => h('span', { 'data-since': t }, fmtDur(now - t));
+  const lastS = feedSessions().at(-1);
+  const lastD = events.find((e) => e.kind === 'diaper');
+  const os = ongoing('sleep');
+  const lastSleep = events.find((e) => e.kind === 'sleep' && e.end_at);
+  const runA = runningActivities()[0];
+  const lastA = events.find((e) => e.kind === 'activity' && e.end_at);
+  $('#tiles').replaceChildren(
+    tile('feed', '🍼', 'Feed', lastS ? since(lastS.start) : '—',
+      lastS ? `ago · ${lastS.items.map(shortFeed).join(' + ')}` : 'Tap to log', () => openFeedSheet()),
+    tile('diaper', '🧷', 'Diaper', lastD ? since(ms(lastD.start_at)) : '—',
+      lastD ? `ago · ${diaperText(lastD.data)}` : 'Tap to log', () => openDiaperSheet()),
+    os
+      ? tile('sleep running', '😴', 'Sleeping', since(ms(os.start_at)), 'tap when awake', () => stopEvent(os))
+      : tile('sleep', '🌙', lastSleep ? 'Awake' : 'Sleep', lastSleep ? since(ms(lastSleep.end_at)) : '—',
+        lastSleep ? `last sleep ${fmtDur(ms(lastSleep.end_at) - ms(lastSleep.start_at))}` : 'Tap to start', () => openSleepSheet()),
+    runA
+      ? tile('activity running', '⭐', 'Activity', since(ms(runA.start_at)), `${runA.data.name} · now`, () => openActivitySheet())
+      : tile('activity', '⭐', 'Activity', lastA ? since(ms(lastA.end_at)) : '—',
+        lastA ? `ago · ${lastA.data.name}` : 'Outdoors, bath, anything', () => openActivitySheet()));
+}
+
+function renderSummary() {
+  const now = Date.now(), a = now - 864e5;
+  const feeds = events.filter((e) => e.kind === 'feed');
+  const bottle = feeds.filter((e) => e.data.method === 'bottle' && ms(e.start_at) >= a)
+    .reduce((s, e) => s + (e.data.amount_ml || 0), 0);
+  const breast = feeds.filter((e) => e.data.method === 'breast').reduce((s, e) => s + overlap(e, a, now), 0);
+  const diapers = events.filter((e) => e.kind === 'diaper' && ms(e.start_at) >= a);
+  const sleep = events.filter((e) => e.kind === 'sleep').reduce((s, e) => s + overlap(e, a, now), 0);
+  const pills = [
+    ['Feeds', feedSessions().filter((s) => s.start >= a).length],
+    breast ? ['Breast', fmtDur(breast)] : null,
+    bottle ? ['Bottle', fmtAmount(bottle)] : null,
+    ['Wet', diapers.filter((e) => e.data.pee).length],
+    ['Dirty', diapers.filter((e) => e.data.poop).length],
+    ['Sleep', fmtDur(sleep)],
+  ].filter(Boolean);
+  const acts = new Map();   // name -> {n, t}, newest first
+  for (const e of events) {
+    if (e.kind !== 'activity' || endMs(e) < a) continue;
+    const key = e.data.name.toLowerCase();
+    const cur = acts.get(key) || { name: e.data.name, n: 0, t: 0 };
+    cur.n += 1;
+    if (!isPoint(e)) cur.t += overlap(e, a, now);
+    acts.set(key, cur);
+  }
+  for (const { name, n, t } of [...acts.values()].slice(0, 5)) pills.push([name, t ? fmtDur(t) : `×${n}`]);
+  $('#summary').replaceChildren(h('span', { class: 'pill head' }, 'Last 24h'),
+    ...pills.map(([k, v]) => h('span', { class: 'pill' }, `${k} `, h('b', {}, String(v)))));
+}
+
+function renderTimeline() {
+  const wrap = $('#timeline');
+  $('#more').classList.toggle('hidden', !events.length);
+  if (!events.length) {
+    wrap.replaceChildren(h('p', { class: 'empty' }, 'Nothing logged yet. Tap a tile above to start.'));
+    return;
+  }
+  const sessions = feedSessions();
+  const byDay = new Map();
+  for (const e of events) {
+    const k = dayKey(ms(e.start_at));
+    if (!byDay.has(k)) byDay.set(k, []);
+    byDay.get(k).push(e);
+  }
+  const out = [];
+  for (const [k, list] of byDay) {
+    const [a, b] = dayBounds(k);
+    const nFeeds = sessions.filter((s) => s.start >= a && s.start < b).length;
+    const diapers = list.filter((e) => e.kind === 'diaper');
+    const sleep = events.filter((e) => e.kind === 'sleep').reduce((s, e) => s + overlap(e, a, b), 0);
+    const stats = [plural(nFeeds, 'feed'), `${diapers.filter((e) => e.data.pee).length} wet`,
+      `${diapers.filter((e) => e.data.poop).length} dirty`, sleep ? `${fmtDur(sleep)} sleep` : null];
+    out.push(h('div', { class: 'day' }, h('b', {}, dayLabel(k)), h('span', {}, stats.filter(Boolean).join(' · '))));
+    for (const e of list) out.push(row(e));
+  }
+  wrap.replaceChildren(...out);
+}
+
+function row(e) {
+  const start = ms(e.start_at);
+  const timed = !isPoint(e);
+  const subParts = [];
+  if (e.data.photo) subParts.push('📷 from photo');
+  if (timed && e.end_at) subParts.push(`until ${fmtTime(ms(e.end_at))}`);
+  if (e.note) subParts.push(e.note);
+  return h('button', { class: `row ${e.kind}`, onclick: () => openEdit(e) },
+    h('span', { class: 'time' }, fmtTime(start)),
+    h('span', { class: 'dot' }),
+    h('span', { class: 'desc' }, h('div', {}, describe(e)), subParts.length ? h('div', { class: 'sub' }, subParts.join(' · ')) : null),
+    h('span', { class: 'dur' }, timed ? (e.end_at ? fmtDur(ms(e.end_at) - start) : h('span', { class: 'live' }, 'now')) : ''));
+}
+
+// Live counters: update text in place every second (no re-render, so taps are never lost).
+function tick() {
+  const now = Date.now();
+  for (const el of document.querySelectorAll('[data-since]')) el.textContent = fmtDur(now - Number(el.dataset.since));
+  for (const el of document.querySelectorAll('[data-clock]')) el.textContent = fmtClock(now - Number(el.dataset.clock));
+}
+
+// ---------- sheets & controls ----------
+function openSheet(title, cls, body) {
+  hideToast();
+  if (sheetCleanup) { sheetCleanup(); sheetCleanup = null; }
+  sheetOpenedAt = Date.now();
+  $('#sheet').replaceChildren(
+    h('div', { class: 'backdrop', onclick: () => { if (Date.now() - sheetOpenedAt > 400) closeSheet(); } }),
+    h('div', { class: `panel ${cls}` },
+      h('div', { class: 'panel-head' }, h('h2', {}, title), h('button', { class: 'icon-btn', onclick: closeSheet, 'aria-label': 'Close' }, '✕')),
+      body));
+  $('#sheet').classList.remove('hidden');
+}
+function closeSheet() {
+  $('#sheet').classList.add('hidden');
+  $('#sheet').replaceChildren();
+  pendingPhoto = null;
+  if (sheetCleanup) { sheetCleanup(); sheetCleanup = null; }
+}
+const sheetOpen = () => !$('#sheet').classList.contains('hidden');
+
+let toastTimer = 0;
+function toast(msg, undo) {
+  const el = $('#toast');
+  el.replaceChildren(...[h('span', {}, msg),
+    undo ? h('button', { class: 'link', onclick: () => { hideToast(); run(undo, 'Undone'); } }, 'Undo') : null].filter(Boolean));
+  el.classList.remove('hidden');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(hideToast, undo ? 7000 : 4000);
+}
+function hideToast() { $('#toast').classList.add('hidden'); }
+
+function seg(options, value, onChange) {
+  let cur = value;
+  const btns = options.map(([v, label]) => h('button', {
+    type: 'button', class: v === cur ? 'on' : '',
+    onclick: () => { cur = v; btns.forEach((b, i) => b.classList.toggle('on', options[i][0] === cur)); onChange && onChange(v); },
+  }, label));
+  const el = h('div', { class: 'seg' }, btns);
+  el.get = () => cur;
+  el.set = (v) => { if (v !== cur) btns[options.findIndex((o) => o[0] === v)]?.click(); };
+  return el;
+}
+
+// Date/time box with a line underneath naming the day it resolves to.
+function dtBox(iso) {
+  const input = h('input', { type: 'datetime-local', class: 'dt' });
+  if (iso) input.value = toLocalInput(new Date(iso));
+  const preview = h('div', { class: 'hint when-preview' });
+  let dirty = false;
+  const read = () => resolvePast(fromLocalInput(input.value));
+  const show = (text) => {
+    preview.textContent = text ?? whenText(read());
+    preview.classList.toggle('warn', preview.textContent.startsWith('In the future'));
+  };
+  const onEdit = () => { dirty = true; show(); };
+  input.addEventListener('input', onEdit);
+  input.addEventListener('change', onEdit);
+  // When the user leaves the box, show the day we actually picked (e.g. roll 11 PM back to yesterday).
+  input.addEventListener('blur', () => {
+    if (!dirty) return;
+    const d = read();
+    if (d && !isNaN(d)) input.value = toLocalInput(d);
+    show();
+  });
+  show();
+  return { input, preview, read, show };
+}
+
+// "When" picker: quick chips relative to now, plus an exact date/time box.
+function whenPicker(label, initial) {
+  const past = initial && Date.now() - initial.getTime() > 120e3;   // older than 2 min: start there
+  let chosen = past ? initial : null;   // null = "now" at submit time; a Date from a chip; 'typed' = read the box
+  const box = dtBox(null);
+  box.input.value = toLocalInput(past ? initial : new Date());
+  box.show(past ? whenText(initial) : 'Now');
+  const presets = [[0, 'Now'], [5, '−5m'], [10, '−10m'], [15, '−15m'], [30, '−30m'], [60, '−1h']];
+  const chips = presets.map(([mins, text], i) => h('button', {
+    type: 'button', class: `chip${i === 0 && !past ? ' on' : ''}`,
+    onclick: () => {
+      const d = new Date(Date.now() - mins * 60e3);
+      chosen = mins === 0 ? null : d;   // keep seconds; the box only shows minutes
+      box.input.value = toLocalInput(d);
+      box.show(mins === 0 ? 'Now' : whenText(d));
+      chips.forEach((c, j) => c.classList.toggle('on', j === i));
+    },
+  }, text));
+  box.input.addEventListener('input', () => { chosen = 'typed'; chips.forEach((c) => c.classList.remove('on')); });
+  const el = field(label, h('div', { class: 'chips' }, chips), box.input, box.preview);
+  el.get = () => (chosen === null ? new Date() : chosen === 'typed' ? box.read() : chosen);
+  return el;
+}
+
+function durPicker(label, presets) {
+  const input = h('input', { type: 'number', class: 'num', inputmode: 'numeric', min: 1, placeholder: 'minutes' });
+  const chips = presets.map(([mins, text]) => h('button', { type: 'button', class: 'chip', onclick: () => { input.value = mins; mark(); } }, text));
+  const mark = () => chips.forEach((c, i) => c.classList.toggle('on', Number(input.value) === presets[i][0]));
+  input.addEventListener('input', mark);
+  const el = field(label, h('div', { class: 'chips' }, chips), input);
+  el.get = () => { const v = Number(input.value); return v > 0 ? v : null; };
+  return el;
+}
+
+function bottleFields(prev) {
+  const lastBottle = events.find((x) => x.kind === 'feed' && x.data.method === 'bottle')?.data || {};
+  const base = prev || lastBottle;
+  const milk = seg([['breastmilk', 'Breast milk'], ['formula', 'Formula']], base.milk || 'breastmilk');
+  const oz = settings.unit === 'oz';
+  const presets = oz ? [1, 2, 3, 4, 5, 6] : [30, 60, 90, 120, 150, 180];
+  const amt = h('input', { type: 'number', class: 'num', inputmode: 'decimal', min: 0, step: oz ? '0.5' : '5', placeholder: oz ? 'oz' : 'ml' });
+  if (base.amount_ml != null) amt.value = oz ? +(base.amount_ml / ML_PER_OZ).toFixed(1) : Math.round(base.amount_ml);
+  const chips = presets.map((v) => h('button', { type: 'button', class: 'chip', onclick: () => { amt.value = v; mark(); } }, String(v)));
+  const mark = () => chips.forEach((c, i) => c.classList.toggle('on', Number(amt.value) === presets[i]));
+  amt.addEventListener('input', mark);
+  mark();
+  return {
+    els: [field('Milk', milk), field(`Amount (${oz ? 'oz' : 'ml'})`, h('div', { class: 'chips' }, chips), amt)],
+    get: () => {
+      const v = parseFloat(amt.value);
+      const ml = Number.isFinite(v) && v > 0 ? Math.round((oz ? v * ML_PER_OZ : v) * 10) / 10 : null;
+      return { milk: milk.get(), amount_ml: ml };
+    },
+  };
+}
+
+// Two ways to log a timed thing: start a live timer, or log one that already happened.
+function timerOrPast(pane, act, o) {
+  const modes = [['timer', o.timerLabel], ['past', o.pastLabel]];
+  if (o.pointLabel) modes.push(['point', o.pointLabel]);
+  const mode = seg(modes, 'timer', () => draw());
+  const sub = h('div');
+  pane.append(field('', mode), sub);
+  function draw() {
+    if (mode.get() === 'timer') {
+      const when = whenPicker(o.startLabel, o.when);
+      sub.replaceChildren(when);
+      act.replaceChildren(h('button', { class: 'btn primary', onclick: () => o.onStart(() => { const d = when.get(); checkPast(d); return d; }) }, o.startText));
+    } else if (mode.get() === 'point') {
+      const when = whenPicker('When', o.when);
+      sub.replaceChildren(when);
+      act.replaceChildren(h('button', { class: 'btn primary', onclick: () => o.onPoint(() => { const d = when.get(); checkPast(d); return d; }) }, o.pointText));
+    } else {
+      const when = whenPicker(o.endLabel, o.when);
+      const dur = durPicker('How long', o.durations);
+      sub.replaceChildren(when, dur);
+      act.replaceChildren(h('button', {
+        class: 'btn primary',
+        onclick: () => o.onLog(() => {
+          const end = when.get(); checkPast(end);
+          const m = dur.get(); if (!m) throw new Error('Pick how long it lasted');
+          return [new Date(end.getTime() - m * 60e3), end];
+        }),
+      }, o.logText));
+    }
+  }
+  draw();
+  return { setMode: (v) => mode.set(v) };
+}
+
+const noteInput = () => h('input', { class: 'txt', placeholder: 'Optional' });
+
+function openFeedSheet(pre = {}) {
+  const sug = suggestedSide();
+  const last = events.find((x) => x.kind === 'feed');
+  const note = noteInput();
+  const pane = h('div'), act = h('div', { class: 'actions-row' });
+  const type = seg([['left', 'Left'], ['right', 'Right'], ['both', 'Both'], ['bottle', 'Bottle']],
+    last?.data.method === 'bottle' ? 'bottle' : (sug || 'left'), () => draw());
+  const hint = sug ? h('div', { class: 'hint' }, `Suggested start: ${sug} (last feed started on the ${sug === 'left' ? 'right' : 'left'})`) : null;
+  let shown = null;   // 'breast' | 'bottle': only rebuild the form when this changes
+  function draw() {
+    const cat = type.get() === 'bottle' ? 'bottle' : 'breast';
+    if (cat === shown) return;
+    shown = cat;
+    pane.replaceChildren();
+    if (cat === 'bottle') {
+      const when = whenPicker('When', pre.when);
+      const b = bottleFields(null);
+      pane.append(when, ...b.els);
+      act.replaceChildren(h('button', {
+        class: 'btn primary',
+        onclick: () => run(() => {
+          const d = when.get(); checkPast(d);
+          return post({ kind: 'feed', start_at: d.toISOString(), data: { method: 'bottle', ...b.get() }, note: note.value });
+        }, (r) => `Logged bottle${r.data.amount_ml ? ' · ' + fmtAmount(r.data.amount_ml) : ''}${atText(r.start_at)}`, (r) => del(r.id)),
+      }, 'Log bottle'));
+    } else {
+      const data = () => ({ method: 'breast', side: type.get() });   // read the side at tap time
+      timerOrPast(pane, act, {
+        when: pre.when,
+        timerLabel: 'Start timer', pastLabel: 'Already done',
+        startLabel: 'Started', endLabel: 'Finished', startText: 'Start feeding', logText: 'Log feed',
+        durations: [[5, '5m'], [10, '10m'], [15, '15m'], [20, '20m'], [30, '30m'], [45, '45m']],
+        onStart: (get) => run(() => startTimer('feed', data(), get(), note.value), (r) => `Feeding · ${SIDE[r.data.side]}${atText(r.start_at)}`, (r) => del(r.id)),
+        onLog: (get) => run(() => {
+          const [a, b] = get();
+          return post({ kind: 'feed', start_at: a.toISOString(), end_at: b.toISOString(), data: data(), note: note.value });
+        }, (r) => `Logged feed · ${fmtDur(ms(r.end_at) - ms(r.start_at))}${atText(r.start_at)}`, (r) => del(r.id)),
+      });
+    }
+  }
+  draw();
+  openSheet('Feed', 'feed', h('div', {}, field('Type', type, hint), pane, field('Note', note), act));
+}
+
+function openDiaperSheet(pre = {}) {
+  const when = whenPicker('When', pre.when);
+  const note = noteInput();
+  const log = (data) => run(() => {
+    const d = when.get(); checkPast(d);
+    return post({ kind: 'diaper', start_at: d.toISOString(), data, note: note.value });
+  }, (r) => `Logged diaper · ${diaperText(r.data)}${atText(r.start_at)}`, (r) => del(r.id));
+  const btn = (emoji, label, data) => h('button', { class: 'btn', onclick: () => log(data) }, h('span', { class: 'e' }, emoji), label);
+  openSheet('Diaper', 'diaper', h('div', {}, when, field('Note', note),
+    h('div', { class: 'diaper-btns' },
+      btn('💧', 'Pee', { pee: true, poop: false }),
+      btn('💩', 'Poop', { pee: false, poop: true }),
+      btn('💧💩', 'Both', { pee: true, poop: true }))));
+}
+
+function openSleepSheet(pre = {}) {
+  const note = noteInput();
+  const pane = h('div'), act = h('div', { class: 'actions-row' });
+  timerOrPast(pane, act, {
+    when: pre.when,
+    timerLabel: 'Start timer', pastLabel: 'Already done',
+    startLabel: 'Fell asleep', endLabel: 'Woke up', startText: 'Start sleep', logText: 'Log sleep',
+    durations: [[20, '20m'], [30, '30m'], [45, '45m'], [60, '1h'], [90, '1.5h'], [120, '2h'], [180, '3h']],
+    onStart: (get) => run(() => startTimer('sleep', {}, get(), note.value), (r) => `Sleep started${atText(r.start_at)}`, (r) => del(r.id)),
+    onLog: (get) => run(() => {
+      const [a, b] = get();
+      return post({ kind: 'sleep', start_at: a.toISOString(), end_at: b.toISOString(), data: {}, note: note.value });
+    }, (r) => `Logged sleep · ${fmtDur(ms(r.end_at) - ms(r.start_at))}${atText(r.start_at)}`, (r) => del(r.id)),
+  });
+  openSheet('Sleep', 'sleep', h('div', {}, pane, field('Note', note), act));
+}
+
+// Suggestions: names used before (most recent first), then the starter list.
+function activityNames() {
+  const out = new Map();
+  for (const n of knownActivities) out.set(n.toLowerCase(), n);
+  for (const [n] of DEFAULT_ACTIVITIES) if (!out.has(n.toLowerCase())) out.set(n.toLowerCase(), n);
+  return [...out.values()].slice(0, 12);
+}
+
+function openActivitySheet(pre = {}) {
+  const names = activityNames();
+  const nameIn = h('input', { class: 'txt', maxlength: 60, placeholder: 'Or type a new one, e.g. Doctor visit' });
+  const chips = names.map((n) => h('button', { type: 'button', class: 'chip', onclick: () => { nameIn.value = n; mark(); pickMode(n); } }, n));
+  const mark = () => chips.forEach((c, i) => c.classList.toggle('on', sameName(names[i], nameIn.value)));
+  nameIn.addEventListener('input', mark);
+  // Reuse the existing spelling when a typed name matches one ("outdoors" -> "Outdoors").
+  const getName = () => {
+    const n = cleanName(nameIn.value);
+    if (!n) throw new Error('Pick or type an activity');
+    return names.find((x) => sameName(x, n)) || n;
+  };
+  // Pick the logging style this activity used last time (or its starter default).
+  const pickMode = (n) => {
+    const last = events.find((e) => e.kind === 'activity' && e.end_at && sameName(e.data.name, n));
+    const mode = last ? (isPoint(last) ? 'point' : 'timer') : DEFAULT_ACTIVITIES.find(([d]) => sameName(d, n))?.[1];
+    if (mode) ctl.setMode(mode);
+  };
+  const note = noteInput();
+  const pane = h('div'), act = h('div', { class: 'actions-row' });
+  const post1 = (data, a, b) => post({ kind: 'activity', start_at: a.toISOString(), end_at: b ? b.toISOString() : null, data, note: note.value });
+  const ctl = timerOrPast(pane, act, {
+    when: pre.when,
+    timerLabel: 'Start timer', pastLabel: 'Already done', pointLabel: 'Just log',
+    startLabel: 'Started', endLabel: 'Finished', startText: 'Start', logText: 'Log', pointText: 'Log',
+    durations: [[10, '10m'], [15, '15m'], [30, '30m'], [45, '45m'], [60, '1h'], [90, '1.5h'], [120, '2h']],
+    onStart: (get) => run(() => { const name = getName(); return startTimer('activity', { name }, get(), note.value); },
+      (r) => `Started ${r.data.name}${atText(r.start_at)}`, (r) => del(r.id)),
+    onLog: (get) => run(() => { const name = getName(); const [a, b] = get(); return post1({ name }, a, b); },
+      (r) => `Logged ${r.data.name} · ${fmtDur(ms(r.end_at) - ms(r.start_at))}${atText(r.start_at)}`, (r) => del(r.id)),
+    onPoint: (get) => run(() => { const name = getName(); const d = get(); return post1({ name }, d, d); },
+      (r) => `Logged ${r.data.name}${atText(r.start_at)}`, (r) => del(r.id)),
+  });
+  if (pre.name) { nameIn.value = pre.name; mark(); pickMode(pre.name); }
+  if (pre.note) note.value = pre.note;
+  openSheet('Activity', 'activity', h('div', {},
+    field('What', h('div', { class: 'chips' }, chips), nameIn), pane, field('Note', note), act));
+}
+
+// ---------- photo -> Claude's suggestion -> normal entry sheet ----------
+const PHOTO_ACTS = [
+  ['feeding', '🍼', 'Feeding'], ['sleeping', '😴', 'Sleeping'], ['playing', '🧸', 'Playing'],
+  ['diaper_change', '🧷', 'Diaper change'], ['tummy_time', '🐢', 'Tummy time'], ['bath', '🛁', 'Bath'], ['other', '⭐', 'Other'],
+];
+
+// Shrink to 1024px on the long side as JPEG. Re-encoding also drops location (EXIF) data.
+async function shrinkImage(file, maxEdge) {
+  const src = await decodeSmall(file, maxEdge);
+  const scale = Math.min(1, maxEdge / Math.max(src.width, src.height));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(src.width * scale));
+  canvas.height = Math.max(1, Math.round(src.height * scale));
+  canvas.getContext('2d').drawImage(src, 0, 0, canvas.width, canvas.height);
+  if (src.close) src.close();
+  return new Promise((resolve, reject) =>
+    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('encode failed'))), 'image/jpeg', 0.85));
+}
+// Ask the browser to decode at ~maxEdge wide (saves memory on 48+ MP photos); fall back gracefully.
+async function decodeSmall(file, maxEdge) {
+  try { return await createImageBitmap(file, { resizeWidth: maxEdge, resizeQuality: 'high', imageOrientation: 'from-image' }); } catch {}
+  try { return await createImageBitmap(file, { imageOrientation: 'from-image' }); } catch {}
+  return loadImage(file);
+}
+function loadImage(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file), img = new Image();
+    img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('not an image')); };
+    img.src = url;
+  });
+}
+// When the photo was taken: EXIF capture time if present, else the file time if within a day.
+// null means "now" (fresh camera shots, or nothing trustworthy).
+async function photoTime(file) {
+  const exif = await exifTakenAt(file).catch(() => null);
+  const t = exif ? exif.getTime() : file.lastModified;
+  const age = Date.now() - t;
+  if (!t || isNaN(t) || age < 120e3) return null;
+  if (!exif && age > 864e5) return null;   // old file timestamps (edits, downloads) aren't capture times
+  return new Date(t);
+}
+
+// Minimal EXIF reader: DateTimeOriginal (+ OffsetTimeOriginal) from a JPEG's APP1 segment.
+async function exifTakenAt(file) {
+  const v = new DataView(await file.slice(0, 256 * 1024).arrayBuffer());
+  if (v.getUint16(0) !== 0xFFD8) return null;   // JPEG only
+  for (let off = 2; off + 10 <= v.byteLength;) {
+    const marker = v.getUint16(off), len = v.getUint16(off + 2);
+    if (marker === 0xFFE1 && v.getUint32(off + 4) === 0x45786966) return readExifDate(v, off + 10);   // "Exif"
+    if ((marker & 0xFF00) !== 0xFF00 || marker === 0xFFDA) return null;
+    off += 2 + len;
+  }
+  return null;
+}
+function readExifDate(v, tiff) {
+  const le = v.getUint16(tiff) === 0x4949;
+  const u16 = (o) => v.getUint16(tiff + o, le), u32 = (o) => v.getUint32(tiff + o, le);
+  const ascii = (o, n) => { let s = ''; for (let i = 0; i < n; i++) { const c = v.getUint8(tiff + o + i); if (!c) break; s += String.fromCharCode(c); } return s; };
+  const tags = (ifd) => {
+    const out = {};
+    for (let i = 0, n = u16(ifd); i < n; i++) { const e = ifd + 2 + i * 12; out[u16(e)] = { count: u32(e + 4), at: e + 8 }; }
+    return out;
+  };
+  const text = (t) => t && ascii(t.count > 4 ? u32(t.at) : t.at, t.count);
+  const ifd0 = tags(u32(4));
+  if (!ifd0[0x8769]) return null;
+  const exif = tags(u32(ifd0[0x8769].at));
+  const m = /^(\d{4}):(\d{2}):(\d{2}) (\d{2}):(\d{2}):(\d{2})/.exec(text(exif[0x9003]) || '');
+  if (!m) return null;
+  const zone = text(exif[0x9011]) || '';
+  return /^[+-]\d{2}:\d{2}$/.test(zone)
+    ? new Date(`${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}${zone}`)
+    : new Date(+m[1], m[2] - 1, +m[3], +m[4], +m[5], +m[6]);   // no zone recorded: phone's local time
+}
+
+async function handlePhoto(file) {
+  const box = h('div', { class: 'ai-box' }, h('div', { class: 'ai-title' }, 'Preparing photo…'));
+  const frame = h('div', {}, box);
+  openSheet('From a photo', '', frame);   // show something right away; shrinking can take a moment
+  const [when, blob] = await Promise.all([photoTime(file), shrinkImage(file, 1024).catch(() => null)]);
+  if (!box.isConnected) return;           // closed meanwhile
+  if (!blob) {
+    box.replaceChildren(h('div', { class: 'ai-title warn' }, "Couldn't read that photo. Try another one (JPEG works best)."));
+    return;
+  }
+  const url = URL.createObjectURL(blob);
+  sheetCleanup = () => URL.revokeObjectURL(url);
+  frame.prepend(h('img', { class: 'photo', src: url, alt: 'Your photo' }));
+  const ask = async () => {
+    box.replaceChildren(h('div', { class: 'ai-title' }, 'Asking Claude… ', h('span', { class: 'ai-conf', 'data-clock': Date.now() }, '0m 00s')));
+    try {
+      const res = await api('POST', '/api/photo/classify', blob);
+      if (box.isConnected) showSuggestion(box, res, when);
+    } catch (e) {
+      if (!box.isConnected) return;   // sheet was closed meanwhile
+      box.replaceChildren(h('div', { class: 'ai-title warn' }, e.message),
+        h('div', { class: 'actions-row' },
+          h('button', { class: 'btn', onclick: closeSheet }, 'Cancel'),
+          h('button', { class: 'btn primary', onclick: ask }, 'Try again')));
+    }
+  };
+  ask();
+}
+
+function showSuggestion(box, res, when) {
+  let pick = res.activity;
+  const [, emoji, name] = PHOTO_ACTS.find((a) => a[0] === res.activity) || PHOTO_ACTS[PHOTO_ACTS.length - 1];
+  const chips = PHOTO_ACTS.map(([k, e, n], i) => h('button', {
+    type: 'button', class: `chip${k === pick ? ' on' : ''}`,
+    onclick: () => { pick = k; chips.forEach((c, j) => c.classList.toggle('on', j === i)); },
+  }, `${e} ${n}`));
+  box.replaceChildren(
+    res.parsed
+      ? h('div', { class: 'ai-title' }, `${emoji} ${name}`, h('span', { class: 'ai-conf' }, ` · ${Math.round(res.confidence * 100)}% sure`))
+      : h('div', { class: 'ai-title warn' }, "Couldn't read Claude's answer. Pick one below."),
+    h('div', { class: 'hint' }, [res.notes, `Claude answered in ${(res.elapsed_ms / 1000).toFixed(1)} s`].filter(Boolean).join(' · ')),
+    field('Log it as', h('div', { class: 'chips' }, chips)),
+    h('div', { class: 'actions-row' },
+      h('button', { class: 'btn', onclick: closeSheet }, 'Cancel'),
+      h('button', { class: 'btn primary', onclick: () => continueFromPhoto(pick, res, when) }, 'Next')));
+}
+
+// Open the normal sheet for the chosen activity, prefilled, so nothing is saved until you confirm there.
+function continueFromPhoto(pick, res, when) {
+  closeSheet();
+  // An unreadable answer is recorded as unknown (""), not as a real "other".
+  pendingPhoto = res.parsed ? { suggested: res.activity, confidence: res.confidence } : { suggested: '', confidence: null };
+  const pre = { when };
+  if (pick === 'feeding') openFeedSheet(pre);
+  else if (pick === 'sleeping') openSleepSheet(pre);
+  else if (pick === 'diaper_change') openDiaperSheet(pre);
+  else openActivitySheet({ ...pre, name: { playing: 'Playing', tummy_time: 'Tummy time', bath: 'Bath' }[pick] || '', note: pick === 'other' ? res.notes : '' });
+}
+
+function openEdit(e) {
+  const start = dtBox(e.start_at), end = dtBox(e.end_at);
+  const origStart = start.input.value, origEnd = end.input.value;
+  const note = noteInput();
+  note.value = e.note || '';
+  const endField = field('Ended', end.input, end.preview, h('div', { class: 'hint' }, 'Empty = still going. ',
+    h('button', { type: 'button', class: 'linkish', onclick: () => { end.input.value = ''; end.show(); } }, 'Clear')));
+  const details = h('div');
+  let method = e.data.method;
+  let getData = () => e.data;
+
+  function draw() {
+    details.replaceChildren();
+    if (e.kind === 'feed') {
+      details.append(field('Type', seg([['breast', 'Breast'], ['bottle', 'Bottle']], method, (v) => { method = v; draw(); })));
+      if (method === 'breast') {
+        const side = seg([['left', 'Left'], ['right', 'Right'], ['both', 'Both']], e.data.side || 'left');
+        details.append(field('Side', side));
+        getData = () => ({ method: 'breast', side: side.get() });
+      } else {
+        const b = bottleFields(e.data.method === 'bottle' ? e.data : null);
+        details.append(...b.els);
+        getData = () => ({ method: 'bottle', ...b.get() });
+      }
+    } else if (e.kind === 'diaper') {
+      const cur = e.data.pee && e.data.poop ? 'both' : e.data.poop ? 'poop' : e.data.pee ? 'pee' : 'dry';
+      const d = seg([['pee', 'Pee'], ['poop', 'Poop'], ['both', 'Both'], ['dry', 'Dry']], cur);
+      details.append(field('What', d));
+      getData = () => ({ pee: ['pee', 'both'].includes(d.get()), poop: ['poop', 'both'].includes(d.get()) });
+    } else if (e.kind === 'activity') {
+      const nameIn = h('input', { class: 'txt', maxlength: 60 });
+      nameIn.value = e.data.name;
+      details.append(field('Activity', nameIn));
+      getData = () => ({ name: cleanName(nameIn.value) });
+    } else {
+      getData = () => ({});
+    }
+    const timed = e.kind === 'sleep' || (e.kind === 'feed' && method === 'breast') || (e.kind === 'activity' && !isPoint(e));
+    endField.classList.toggle('hidden', !timed);
+  }
+  draw();
+
+  const save = () => run(() => {
+    const body = { data: getData(), note: note.value };
+    if (start.input.value !== origStart) { const d = start.read(); checkPast(d); body.start_at = d.toISOString(); }
+    if (!endField.classList.contains('hidden') && end.input.value !== origEnd) {
+      if (end.input.value) { const d = end.read(); checkPast(d); body.end_at = d.toISOString(); } else body.end_at = null;
+    }
+    return patch(e.id, body);
+  }, 'Saved', () => patch(e.id, { start_at: e.start_at, end_at: e.end_at, data: e.data, note: e.note }));
+
+  const remove = () => {
+    if (!confirm('Delete this entry?')) return;
+    run(() => del(e.id), 'Deleted', () => post({ kind: e.kind, start_at: e.start_at, end_at: e.end_at, data: e.data, note: e.note }));
+  };
+
+  openSheet(`Edit ${e.kind}`, e.kind, h('div', {},
+    details,
+    field(isPoint(e) ? 'Time' : 'Started', start.input, start.preview),
+    endField,
+    field('Note', note),
+    h('div', { class: 'actions-row' },
+      h('button', { class: 'btn danger', onclick: remove }, 'Delete'),
+      h('button', { class: 'btn primary', onclick: save }, 'Save'))));
+}
+
+function openSettings() {
+  const name = h('input', { class: 'txt', placeholder: "Baby's name (optional)" });
+  name.value = settings.name;
+  const unit = seg([['ml', 'ml'], ['oz', 'oz']], settings.unit);
+  openSheet('Settings', '', h('div', {},
+    field('Name', name),
+    field('Bottle units', unit),
+    field('Export everything', h('div', { class: 'chips' },
+      h('a', { class: 'chip', href: '/api/export.csv', download: '' }, 'CSV'),
+      h('a', { class: 'chip', href: '/api/export.json', download: '' }, 'JSON'))),
+    h('div', { class: 'hint' }, 'Tip: use "Add to Home Screen" in your browser for one-tap access. Settings are saved on this device.'),
+    h('div', { class: 'actions-row' }, h('button', {
+      class: 'btn primary',
+      onclick: () => { settings.name = name.value.trim(); settings.unit = unit.get(); saveSettings(); closeSheet(); renderAll(); },
+    }, 'Save'))));
+}
+
+// ---------- boot ----------
+$('#settingsBtn').addEventListener('click', openSettings);
+$('#photoInput').addEventListener('change', (ev) => {
+  const file = ev.target.files && ev.target.files[0];
+  ev.target.value = '';   // allow choosing the same photo again
+  if (file) handlePhoto(file);
+});
+$('#more').addEventListener('click', () => { windowDays += 14; load(); });
+document.addEventListener('visibilitychange', () => { if (!document.hidden && !sheetOpen()) load(); });
+setInterval(tick, 1000);
+setInterval(() => { if (!sheetOpen()) { renderTiles(); renderSummary(); } }, 30e3);
+setInterval(() => { if (!document.hidden && !sheetOpen() && !busy) load(); }, 60e3);
+load();
+</script>
+</body>
+</html>
