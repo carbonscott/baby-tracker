@@ -109,17 +109,87 @@
     display: flex; align-items: center; gap: 16px; padding: 12px 16px;
     background: #2c323b; border-radius: 12px; box-shadow: 0 6px 24px rgba(0, 0, 0, .45); }
   .toast .link { background: none; border: 0; color: #7fb2ff; font-weight: 700; }
+  /* over an open sheet (errors like "Pick how long it lasted"): show at the top so it never covers Save */
+  .toast.top { top: calc(12px + env(safe-area-inset-top)); bottom: auto; }
 
-  /* photo -> suggested entry */
-  .photo-btn { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; margin: 0 0 12px; padding: 14px;
+  /* Claude: photo / text -> proposed entries -> review; ask the log */
+  .ai { --c: #6ea0f7; }
+  .panel.tall { min-height: 80vh; }   /* keeps the text box high up, above the phone keyboard */
+  .ai-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 0 0 12px; }
+  .ai-btn { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 14px;
     background: var(--card); border: 1px dashed var(--line); border-radius: 16px; font-weight: 600; cursor: pointer; }
-  .photo-btn:active { background: var(--card2); }
+  .ai-btn:active { background: var(--card2); }
   .visually-hidden { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; pointer-events: none; }
+  textarea.txt { display: block; width: 100%; padding: 12px; background: var(--bg); border: 1px solid var(--line); border-radius: 10px;
+    font: inherit; font-size: 16px; color: inherit; resize: vertical; }
+  .btn:disabled { opacity: .45; }
+  .btn.small { padding: 8px 12px; font-size: 14px; }
   .photo { display: block; width: 100%; max-height: 260px; margin-top: 10px; object-fit: contain; background: #000; border-radius: 14px; }
-  .ai-box { margin-top: 12px; }
-  .ai-title { font-size: 18px; font-weight: 700; }
-  .ai-title.warn { font-size: 15px; color: var(--danger); }
-  .ai-conf { font-size: 14px; font-weight: 600; color: var(--muted); }
+  .thumb { flex: none; width: 64px; height: 64px; object-fit: cover; background: #000; border-radius: 10px; }
+  .wait { margin: 16px 0 4px; font-size: 17px; font-weight: 600; }
+  .wait .clock { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .warn-text { margin: 14px 0 4px; color: var(--danger); }
+  .ai-head { display: flex; gap: 12px; align-items: flex-start; margin-top: 10px; }
+  .ai-msg { flex: 1; min-width: 0; font-size: 14px; color: var(--muted); overflow-wrap: anywhere; }
+  .ai-msg.big { font-size: 16px; color: var(--text); }
+  .ai-meta { margin-top: 4px; font-size: 12px; color: var(--muted); }
+  .said { font-style: italic; overflow-wrap: anywhere; }
+  .muted { color: var(--muted); }
+  .attach { display: flex; align-items: center; gap: 10px; margin: 10px 0; }
+  .attach .chip { flex: none; white-space: nowrap; cursor: pointer; }
+  /* one card per proposed entry */
+  .pcard { margin: 12px 0; padding: 12px 12px 12px 14px; border-left: 4px solid var(--c); border-radius: 14px;
+    background: color-mix(in srgb, var(--c) 9%, var(--card2)); }
+  .pcard.off { opacity: .45; }
+  .pcard.done { opacity: .6; }
+  .pc-head { display: flex; align-items: center; gap: 10px; }
+  .pc-title { flex: 1; min-width: 0; font-size: 19px; font-weight: 700; overflow-wrap: anywhere; }
+  .pc-check { flex: none; width: 32px; height: 32px; padding: 0; border: 2px solid var(--c); border-radius: 9px; background: none;
+    color: transparent; font-weight: 800; }
+  .pc-check[aria-checked="true"] { background: var(--c); color: #111; }
+  .pc-edit { flex: none; padding: 8px 14px; font-size: 14px; }
+  .pc-time { margin-top: 4px; font-size: 16px; font-variant-numeric: tabular-nums; }
+  .pc-line { margin-top: 4px; font-size: 15px; }
+  .pc-note { margin-top: 6px; font-size: 15px; overflow-wrap: anywhere; }
+  .pc-why { margin-top: 8px; font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
+  .pc-done { margin-top: 8px; font-weight: 700; color: var(--c); }
+  .need { margin: 10px 0 4px; }
+  .need > label { color: var(--c); font-size: 15px; font-weight: 700; }
+  .pc-editor { margin-top: 6px; padding-top: 2px; border-top: 1px solid var(--line); }
+  .tag { display: inline-block; margin-right: 8px; padding: 1px 8px; border: 1px solid var(--c); border-radius: 999px;
+    font-size: 12px; font-weight: 600; color: var(--c); vertical-align: 3px; }
+  .hint.care { color: #f1c66b; }
+  .chip .sw { display: inline-block; width: 12px; height: 12px; margin-right: 6px; border-radius: 50%; border: 1px solid #fff5; vertical-align: -1px; }
+  .sticky { position: sticky; bottom: calc(-16px - env(safe-area-inset-bottom)); margin: 14px -16px calc(-16px - env(safe-area-inset-bottom));
+    padding: 12px 16px calc(16px + env(safe-area-inset-bottom)); background: var(--card); border-top: 1px solid var(--line); }
+  .sticky .btn.primary { flex: 2; font-size: 19px; }
+  .more { margin: 6px 0 4px; }
+  /* Ask: question + answer turns */
+  .turn + .turn { margin-top: 18px; padding-top: 6px; border-top: 1px solid var(--line); }
+  .q { margin: 14px 0 8px; font-weight: 600; color: var(--muted); overflow-wrap: anywhere; }
+  .q::before { content: "“"; }
+  .q::after { content: "”"; }
+  .meta-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 8px; font-size: 12px; color: var(--muted); }
+  .follow { display: flex; gap: 8px; align-items: flex-end; margin-top: 18px; }
+  .follow .btn { flex: none; padding: 13px 18px; }
+  .md { font-size: 15px; line-height: 1.5; overflow-wrap: anywhere; }
+  .md h3 { margin: 14px 0 6px; font-size: 17px; }
+  .md h4 { margin: 12px 0 4px; font-size: 15px; }
+  .md h5 { margin: 10px 0 4px; font-size: 14px; color: var(--muted); }
+  .md > :first-child { margin-top: 0; }
+  .md p { margin: 8px 0; }
+  .md ul, .md ol { margin: 6px 0; padding-left: 22px; }
+  .md li { margin: 3px 0; }
+  .md code { padding: 1px 5px; background: var(--bg); border-radius: 5px; font-size: 13px; }
+  .md pre { padding: 10px; background: var(--bg); border-radius: 8px; white-space: pre-wrap; }
+  .md pre code { padding: 0; }
+  .md blockquote { margin: 8px 0; padding-left: 10px; border-left: 3px solid var(--line); color: var(--muted); }
+  .md hr { margin: 12px 0; border: 0; border-top: 1px solid var(--line); }
+  .md .tbl { margin: 8px 0; overflow-x: auto; }
+  /* break-word (not .md's anywhere): columns stay at least one word wide ("Diapers", not "Diape|rs"); .tbl scrolls */
+  .md table { border-collapse: collapse; font-size: 14px; font-variant-numeric: tabular-nums; overflow-wrap: break-word; }
+  .md th, .md td { padding: 6px 10px 6px 0; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+  .md th { color: var(--muted); font-weight: 600; white-space: nowrap; }
 </style>
 </head>
 <body>
@@ -130,8 +200,12 @@
 <main>
   <section id="ongoing"></section>
   <section id="tiles" class="tiles"></section>
-  <label class="photo-btn" for="photoInput">📷 Log from a photo</label>
+  <div class="ai-row">
+    <label class="ai-btn" for="photoInput">📷 Photo</label>
+    <button id="claudeBtn" class="ai-btn">✨ Claude</button>
+  </div>
   <input id="photoInput" class="visually-hidden" type="file" accept="image/*">
+  <datalist id="placeList"></datalist>
   <section id="summary" class="summary"></section>
   <section id="timeline"><p class="empty">Loading…</p></section>
   <button id="more" class="ghost hidden">Show older entries</button>
@@ -144,6 +218,7 @@
 
 // ---------- settings & state ----------
 const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
+const KINDS = ['feed', 'diaper', 'sleep', 'activity'];
 const ML_PER_OZ = 29.5735;
 const SESSION_GAP_MS = 15 * 60e3;   // feeds closer than this count as one feeding session
 const settings = Object.assign({ unit: 'ml', name: '' }, safeJSON(localStorage.getItem('bt.settings')));
@@ -153,8 +228,6 @@ let knownActivities = [];            // activity names, most recently used first
 const DEFAULT_ACTIVITIES = [['Outdoors', 'timer'], ['Tummy time', 'timer'], ['Bath', 'point'], ['Vitamin D', 'point']];
 let windowDays = 7;
 let busy = false;
-let pendingPhoto = null;   // {suggested, confidence}: attached to the entry saved after a photo suggestion
-let sheetCleanup = null;   // run when the open sheet closes (e.g. free the photo preview)
 let sheetOpenedAt = 0;     // taps right after a sheet opens are the 2nd half of a double tap
 
 function safeJSON(s) { try { return JSON.parse(s) || {}; } catch { return {}; } }
@@ -170,12 +243,14 @@ function h(tag, attrs, ...kids) {
     else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
     else el.setAttribute(k, v === true ? '' : v);
   }
-  for (const kid of kids.flat()) {
+  for (const kid of kids.flat(Infinity)) {
     if (kid == null || kid === false) continue;
     el.append(kid instanceof Node ? kid : document.createTextNode(String(kid)));
   }
   return el;
 }
+// For replaceChildren(), which (unlike h) would print null as text.
+const nodes = (...kids) => kids.flat(Infinity).filter((k) => k != null && k !== false);
 const field = (label, ...kids) => h('div', { class: 'field' }, label ? h('label', {}, label) : null, ...kids);
 
 // ---------- formatting ----------
@@ -267,6 +342,28 @@ function shortFeed(e) {
   if (e.data.method === 'bottle') return e.data.amount_ml != null ? fmtAmount(e.data.amount_ml) : 'Bottle';
   return `${SIDE_SHORT[e.data.side] || '?'} ${fmtDur(endMs(e) - ms(e.start_at))}`;
 }
+const KIND_EMOJI = { diaper: '🧷', sleep: '😴', activity: '⭐' };
+const kindEmoji = (e) => (e.kind === 'feed' ? (e.data.method === 'bottle' ? '🍼' : '🤱') : KIND_EMOJI[e.kind] || '•');
+
+// Stool color/texture (diapers with poop). Colors follow the usual stool color card.
+const STOOL_COLORS = [['yellow', 'Yellow', '#e2b93b'], ['orange', 'Orange', '#e08a3a'], ['green', 'Green', '#6f9a3b'],
+  ['brown', 'Brown', '#8b5a2b'], ['black', 'Black', '#161616'], ['red', 'Red', '#c94040'], ['pale', 'Pale', '#ebe6d6']];
+const TEXTURES = [['watery', 'Watery'], ['loose', 'Loose'], ['seedy', 'Seedy'], ['soft', 'Soft'], ['pasty', 'Pasty'], ['formed', 'Formed'], ['hard', 'Hard']];
+const STOOL_HINT = {
+  pale: 'Pale or white stool: worth a quick call to your pediatrician if you see it again.',
+  black: 'Black stool after the first few days: worth a quick call to your pediatrician.',
+  red: 'Red in the stool could be blood: worth a quick call to your pediatrician.',
+};
+const stoolHint = (e) => (e.kind === 'diaper' && e.data.poop && STOOL_HINT[e.data.color]) || '';
+function stoolText(d) {
+  if (!d.poop) return '';
+  const color = STOOL_COLORS.find((c) => c[0] === d.color)?.[1];
+  const texture = TEXTURES.find((t) => t[0] === d.texture)?.[1].toLowerCase();
+  return [color, texture].filter(Boolean).join(', ');
+}
+const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+// Extra details shown under an entry: "Yellow, seedy", "📍 Crib"
+const detailBits = (e) => [stoolText(e.data), e.data.place ? `📍 ${cap(String(e.data.place))}` : ''].filter(Boolean);
 
 // ---------- derived data ----------
 const ongoing = (kind) => events.find((e) => e.kind === kind && e.end_at == null);
@@ -296,11 +393,10 @@ function suggestedSide() {
 async function api(method, path, body) {
   let res;
   try {
-    const raw = body instanceof Blob;   // photos go up as raw image bytes
     res = await fetch(path, {
       method, credentials: 'same-origin',
-      headers: raw ? { 'Content-Type': body.type || 'image/jpeg' } : body ? { 'Content-Type': 'application/json' } : {},
-      body: raw ? body : body ? JSON.stringify(body) : undefined,
+      headers: body ? { 'Content-Type': 'application/json' } : {},
+      body: body ? JSON.stringify(body) : undefined,
     });
   } catch {
     throw new Error("Can't reach the server (offline or logged out?)");
@@ -311,11 +407,14 @@ async function api(method, path, body) {
   if (!res.ok) throw new Error(json.error || res.statusText);
   return json;
 }
-const post = (body) => api('POST', '/api/events', {
-  ...body, tz: TZ, ...(pendingPhoto ? { data: { ...(body.data || {}), photo: pendingPhoto } } : {}),
-});
+const post = (body) => api('POST', '/api/events', { ...body, tz: TZ });
 const patch = (id, body) => api('PATCH', `/api/events/${id}`, body);
 const del = (id) => api('DELETE', `/api/events/${id}`);
+// Keep the local list current between saves in one batch (e.g. the running-timer rule below).
+function remember(r) {
+  const i = events.findIndex((e) => e.id === r.id);
+  if (i >= 0) events[i] = r; else events.unshift(r);
+}
 
 async function load() {
   const since = new Date(Date.now() - windowDays * 864e5).toISOString();
@@ -352,13 +451,17 @@ function checkPast(d) {
   if (d.getTime() > Date.now() + 60e3) throw new Error("That's in the future. Check the date.");
 }
 
+// One running timer per kind (per name for activities, so "Outdoors" and "Tummy time" can overlap):
+// a new timer ends the previous one where the new one starts. Returns the ended row as it was.
+async function endRunning(kind, name, startMs) {
+  const prev = events.find((e) => e.kind === kind && e.end_at == null && (kind !== 'activity' || sameName(e.data.name, name)));
+  if (!prev) return null;
+  const end = Math.max(ms(prev.start_at), Math.min(Date.now(), startMs));
+  remember(await patch(prev.id, { end_at: new Date(end).toISOString() }));
+  return prev;
+}
 async function startTimer(kind, data, start, note) {
-  // One running timer per kind (per name for activities, so "Outdoors" and "Tummy time" can overlap).
-  const prev = events.find((e) => e.kind === kind && e.end_at == null && (kind !== 'activity' || sameName(e.data.name, data.name)));
-  if (prev) {
-    const end = Math.max(ms(prev.start_at), Math.min(Date.now(), start.getTime()));
-    await patch(prev.id, { end_at: new Date(end).toISOString() });
-  }
+  await endRunning(kind, data.name, start.getTime());
   return post({ kind, start_at: start.toISOString(), data, note });
 }
 function stopEvent(e) {
@@ -501,8 +604,10 @@ function row(e) {
   const start = ms(e.start_at);
   const timed = !isPoint(e);
   const subParts = [];
-  if (e.data.photo) subParts.push('📷 from photo');
+  if (e.data.ai) subParts.push(`✨ Claude${String(e.data.ai.source || '').includes('photo') ? ' 📷' : ''}`);
+  else if (e.data.photo) subParts.push('📷 from photo');
   if (timed && e.end_at) subParts.push(`until ${fmtTime(ms(e.end_at))}`);
+  subParts.push(...detailBits(e));
   if (e.note) subParts.push(e.note);
   return h('button', { class: `row ${e.kind}`, onclick: () => openEdit(e) },
     h('span', { class: 'time' }, fmtTime(start)),
@@ -521,7 +626,6 @@ function tick() {
 // ---------- sheets & controls ----------
 function openSheet(title, cls, body) {
   hideToast();
-  if (sheetCleanup) { sheetCleanup(); sheetCleanup = null; }
   sheetOpenedAt = Date.now();
   $('#sheet').replaceChildren(
     h('div', { class: 'backdrop', onclick: () => { if (Date.now() - sheetOpenedAt > 400) closeSheet(); } }),
@@ -533,8 +637,6 @@ function openSheet(title, cls, body) {
 function closeSheet() {
   $('#sheet').classList.add('hidden');
   $('#sheet').replaceChildren();
-  pendingPhoto = null;
-  if (sheetCleanup) { sheetCleanup(); sheetCleanup = null; }
 }
 const sheetOpen = () => !$('#sheet').classList.contains('hidden');
 
@@ -543,6 +645,7 @@ function toast(msg, undo) {
   const el = $('#toast');
   el.replaceChildren(...[h('span', {}, msg),
     undo ? h('button', { class: 'link', onclick: () => { hideToast(); run(undo, 'Undone'); } }, 'Undo') : null].filter(Boolean));
+  el.classList.toggle('top', sheetOpen());
   el.classList.remove('hidden');
   clearTimeout(toastTimer);
   toastTimer = setTimeout(hideToast, undo ? 7000 : 4000);
@@ -620,14 +723,35 @@ function durPicker(label, presets) {
   return el;
 }
 
+// Single-choice chips that may stay empty (tap the chosen one again to clear it).
+function chipPick(options, value) {
+  let cur = value || null;
+  const chips = options.map(([v, label, swatch]) => h('button', {
+    type: 'button', class: 'chip', onclick: () => { cur = cur === v ? null : v; mark(); },
+  }, swatch ? h('span', { class: 'sw', style: `background:${swatch}` }) : null, label));
+  const mark = () => chips.forEach((c, i) => c.classList.toggle('on', options[i][0] === cur));
+  mark();
+  const el = h('div', { class: 'chips' }, chips);
+  el.get = () => cur;
+  return el;
+}
+
+const DURATIONS = {
+  feed: [[5, '5m'], [10, '10m'], [15, '15m'], [20, '20m'], [30, '30m'], [45, '45m']],
+  sleep: [[20, '20m'], [30, '30m'], [45, '45m'], [60, '1h'], [90, '1.5h'], [120, '2h'], [180, '3h']],
+  activity: [[10, '10m'], [15, '15m'], [30, '30m'], [45, '45m'], [60, '1h'], [90, '1.5h'], [120, '2h']],
+};
+
+// prev: the bottle being edited (keeps its values exactly unless changed); null = prefill from the last bottle.
 function bottleFields(prev) {
   const lastBottle = events.find((x) => x.kind === 'feed' && x.data.method === 'bottle')?.data || {};
   const base = prev || lastBottle;
-  const milk = seg([['breastmilk', 'Breast milk'], ['formula', 'Formula']], base.milk || 'breastmilk');
+  const milk = seg([['breastmilk', 'Breast milk'], ['formula', 'Formula']], prev ? prev.milk : base.milk || 'breastmilk');
   const oz = settings.unit === 'oz';
   const presets = oz ? [1, 2, 3, 4, 5, 6] : [30, 60, 90, 120, 150, 180];
   const amt = h('input', { type: 'number', class: 'num', inputmode: 'decimal', min: 0, step: oz ? '0.5' : '5', placeholder: oz ? 'oz' : 'ml' });
   if (base.amount_ml != null) amt.value = oz ? +(base.amount_ml / ML_PER_OZ).toFixed(1) : Math.round(base.amount_ml);
+  const shown = amt.value;   // untouched -> keep the stored ml (no oz rounding drift)
   const chips = presets.map((v) => h('button', { type: 'button', class: 'chip', onclick: () => { amt.value = v; mark(); } }, String(v)));
   const mark = () => chips.forEach((c, i) => c.classList.toggle('on', Number(amt.value) === presets[i]));
   amt.addEventListener('input', mark);
@@ -636,7 +760,8 @@ function bottleFields(prev) {
     els: [field('Milk', milk), field(`Amount (${oz ? 'oz' : 'ml'})`, h('div', { class: 'chips' }, chips), amt)],
     get: () => {
       const v = parseFloat(amt.value);
-      const ml = Number.isFinite(v) && v > 0 ? Math.round((oz ? v * ML_PER_OZ : v) * 10) / 10 : null;
+      let ml = Number.isFinite(v) && v > 0 ? Math.round((oz ? v * ML_PER_OZ : v) * 10) / 10 : null;
+      if (amt.value === shown && base.amount_ml != null) ml = base.amount_ml;
       return { milk: milk.get(), amount_ml: ml };
     },
   };
@@ -709,7 +834,7 @@ function openFeedSheet(pre = {}) {
         when: pre.when,
         timerLabel: 'Start timer', pastLabel: 'Already done',
         startLabel: 'Started', endLabel: 'Finished', startText: 'Start feeding', logText: 'Log feed',
-        durations: [[5, '5m'], [10, '10m'], [15, '15m'], [20, '20m'], [30, '30m'], [45, '45m']],
+        durations: DURATIONS.feed,
         onStart: (get) => run(() => startTimer('feed', data(), get(), note.value), (r) => `Feeding · ${SIDE[r.data.side]}${atText(r.start_at)}`, (r) => del(r.id)),
         onLog: (get) => run(() => {
           const [a, b] = get();
@@ -744,7 +869,7 @@ function openSleepSheet(pre = {}) {
     when: pre.when,
     timerLabel: 'Start timer', pastLabel: 'Already done',
     startLabel: 'Fell asleep', endLabel: 'Woke up', startText: 'Start sleep', logText: 'Log sleep',
-    durations: [[20, '20m'], [30, '30m'], [45, '45m'], [60, '1h'], [90, '1.5h'], [120, '2h'], [180, '3h']],
+    durations: DURATIONS.sleep,
     onStart: (get) => run(() => startTimer('sleep', {}, get(), note.value), (r) => `Sleep started${atText(r.start_at)}`, (r) => del(r.id)),
     onLog: (get) => run(() => {
       const [a, b] = get();
@@ -787,7 +912,7 @@ function openActivitySheet(pre = {}) {
     when: pre.when,
     timerLabel: 'Start timer', pastLabel: 'Already done', pointLabel: 'Just log',
     startLabel: 'Started', endLabel: 'Finished', startText: 'Start', logText: 'Log', pointText: 'Log',
-    durations: [[10, '10m'], [15, '15m'], [30, '30m'], [45, '45m'], [60, '1h'], [90, '1.5h'], [120, '2h']],
+    durations: DURATIONS.activity,
     onStart: (get) => run(() => { const name = getName(); return startTimer('activity', { name }, get(), note.value); },
       (r) => `Started ${r.data.name}${atText(r.start_at)}`, (r) => del(r.id)),
     onLog: (get) => run(() => { const name = getName(); const [a, b] = get(); return post1({ name }, a, b); },
@@ -801,12 +926,7 @@ function openActivitySheet(pre = {}) {
     field('What', h('div', { class: 'chips' }, chips), nameIn), pane, field('Note', note), act));
 }
 
-// ---------- photo -> Claude's suggestion -> normal entry sheet ----------
-const PHOTO_ACTS = [
-  ['feeding', '🍼', 'Feeding'], ['sleeping', '😴', 'Sleeping'], ['playing', '🧸', 'Playing'],
-  ['diaper_change', '🧷', 'Diaper change'], ['tummy_time', '🐢', 'Tummy time'], ['bath', '🛁', 'Bath'], ['other', '⭐', 'Other'],
-];
-
+// ---------- photos: shrunk in the browser (which also drops EXIF); capture time read first ----------
 // Shrink to 1024px on the long side as JPEG. Re-encoding also drops location (EXIF) data.
 async function shrinkImage(file, maxEdge) {
   const src = await decodeSmall(file, maxEdge);
@@ -877,63 +997,95 @@ function readExifDate(v, tiff) {
     : new Date(+m[1], m[2] - 1, +m[3], +m[4], +m[5], +m[6]);   // no zone recorded: phone's local time
 }
 
-async function handlePhoto(file) {
-  const box = h('div', { class: 'ai-box' }, h('div', { class: 'ai-title' }, 'Preparing photo…'));
-  const frame = h('div', {}, box);
-  openSheet('From a photo', '', frame);   // show something right away; shrinking can take a moment
+async function blobToBase64(blob) {
+  const url = await new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result));
+    r.onerror = () => reject(r.error);
+    r.readAsDataURL(blob);
+  });
+  return url.slice(url.indexOf(',') + 1);
+}
+// A photo ready for Claude: {b64 (shrunk JPEG, no EXIF), when (capture time; null = just taken), src (preview)}.
+async function preparePhoto(file) {
   const [when, blob] = await Promise.all([photoTime(file), shrinkImage(file, 1024).catch(() => null)]);
-  if (!box.isConnected) return;           // closed meanwhile
-  if (!blob) {
-    box.replaceChildren(h('div', { class: 'ai-title warn' }, "Couldn't read that photo. Try another one (JPEG works best)."));
-    return;
-  }
-  const url = URL.createObjectURL(blob);
-  sheetCleanup = () => URL.revokeObjectURL(url);
-  frame.prepend(h('img', { class: 'photo', src: url, alt: 'Your photo' }));
-  const ask = async () => {
-    box.replaceChildren(h('div', { class: 'ai-title' }, 'Asking Claude… ', h('span', { class: 'ai-conf', 'data-clock': Date.now() }, '0m 00s')));
-    try {
-      const res = await api('POST', '/api/photo/classify', blob);
-      if (box.isConnected) showSuggestion(box, res, when);
-    } catch (e) {
-      if (!box.isConnected) return;   // sheet was closed meanwhile
-      box.replaceChildren(h('div', { class: 'ai-title warn' }, e.message),
-        h('div', { class: 'actions-row' },
-          h('button', { class: 'btn', onclick: closeSheet }, 'Cancel'),
-          h('button', { class: 'btn primary', onclick: ask }, 'Try again')));
+  if (!blob) throw new Error("Couldn't read that photo. Try another one (JPEG works best).");
+  const b64 = await blobToBase64(blob);
+  return { b64, when, src: `data:image/jpeg;base64,${b64}` };
+}
+
+// ---------- editing an entry (the edit sheet and Claude's review cards share these controls) ----------
+const OWN_KEYS = ['method', 'side', 'milk', 'amount_ml', 'pee', 'poop', 'color', 'texture', 'name', 'place'];
+// Kind-specific controls plus "Where". get() returns the new data object; keys these controls
+// don't own (ai, photo, anything newer) are kept exactly as they were.
+function detailsEditor(kind, data, onMethod) {
+  const keep = Object.fromEntries(Object.entries(data).filter(([k]) => !OWN_KEYS.includes(k)));
+  const el = h('div');
+  let method = data.method;
+  let get = () => ({});
+  function draw() {
+    el.replaceChildren();
+    if (kind === 'feed') {
+      el.append(field('Type', seg([['breast', 'Breast'], ['bottle', 'Bottle']], method, (v) => { method = v; draw(); if (onMethod) onMethod(v); })));
+      if (method === 'breast') {
+        const side = seg([['left', 'Left'], ['right', 'Right'], ['both', 'Both']], data.side || 'left');
+        el.append(field('Side', side));
+        get = () => ({ method: 'breast', side: side.get() });
+      } else {
+        const b = bottleFields(data.method === 'bottle' ? data : null);
+        el.append(...b.els);
+        get = () => ({ method: 'bottle', ...b.get() });
+      }
+    } else if (kind === 'diaper') {
+      const cur = data.pee && data.poop ? 'both' : data.poop ? 'poop' : data.pee ? 'pee' : 'dry';
+      const what = seg([['pee', 'Pee'], ['poop', 'Poop'], ['both', 'Both'], ['dry', 'Dry']], cur, () => showStool());
+      const poop = () => ['poop', 'both'].includes(what.get());
+      const color = chipPick(STOOL_COLORS, data.color);
+      const texture = chipPick(TEXTURES, data.texture);
+      const care = h('div', { class: 'hint care' });
+      const showCare = () => { care.textContent = STOOL_HINT[color.get()] || ''; care.classList.toggle('hidden', !care.textContent); };
+      color.addEventListener('click', showCare);
+      const stool = h('div', {}, field('Color', color, care), field('Texture', texture));
+      const showStool = () => stool.classList.toggle('hidden', !poop());
+      showCare();
+      showStool();
+      el.append(field('What', what), stool);
+      get = () => {
+        const out = { pee: ['pee', 'both'].includes(what.get()), poop: poop() };
+        if (out.poop && color.get()) out.color = color.get();
+        if (out.poop && texture.get()) out.texture = texture.get();
+        return out;
+      };
+    } else if (kind === 'activity') {
+      const nameIn = h('input', { class: 'txt', maxlength: 60 });
+      nameIn.value = data.name || '';
+      el.append(field('Activity', nameIn));
+      get = () => ({ name: cleanName(nameIn.value) });
     }
+  }
+  draw();
+  const place = h('input', { class: 'txt', maxlength: 40, list: 'placeList', placeholder: 'Optional: crib, car seat, park…' });
+  place.value = data.place || '';
+  fillPlaces();
+  return {
+    el,
+    placeField: field('Where', place),
+    get: () => {
+      const out = { ...keep, ...get() };
+      const p = cleanName(place.value).slice(0, 40);
+      if (p) out.place = p;
+      return out;
+    },
   };
-  ask();
 }
-
-function showSuggestion(box, res, when) {
-  let pick = res.activity;
-  const [, emoji, name] = PHOTO_ACTS.find((a) => a[0] === res.activity) || PHOTO_ACTS[PHOTO_ACTS.length - 1];
-  const chips = PHOTO_ACTS.map(([k, e, n], i) => h('button', {
-    type: 'button', class: `chip${k === pick ? ' on' : ''}`,
-    onclick: () => { pick = k; chips.forEach((c, j) => c.classList.toggle('on', j === i)); },
-  }, `${e} ${n}`));
-  box.replaceChildren(
-    res.parsed
-      ? h('div', { class: 'ai-title' }, `${emoji} ${name}`, h('span', { class: 'ai-conf' }, ` · ${Math.round(res.confidence * 100)}% sure`))
-      : h('div', { class: 'ai-title warn' }, "Couldn't read Claude's answer. Pick one below."),
-    h('div', { class: 'hint' }, [res.notes, `Claude answered in ${(res.elapsed_ms / 1000).toFixed(1)} s`].filter(Boolean).join(' · ')),
-    field('Log it as', h('div', { class: 'chips' }, chips)),
-    h('div', { class: 'actions-row' },
-      h('button', { class: 'btn', onclick: closeSheet }, 'Cancel'),
-      h('button', { class: 'btn primary', onclick: () => continueFromPhoto(pick, res, when) }, 'Next')));
-}
-
-// Open the normal sheet for the chosen activity, prefilled, so nothing is saved until you confirm there.
-function continueFromPhoto(pick, res, when) {
-  closeSheet();
-  // An unreadable answer is recorded as unknown (""), not as a real "other".
-  pendingPhoto = res.parsed ? { suggested: res.activity, confidence: res.confidence } : { suggested: '', confidence: null };
-  const pre = { when };
-  if (pick === 'feeding') openFeedSheet(pre);
-  else if (pick === 'sleeping') openSleepSheet(pre);
-  else if (pick === 'diaper_change') openDiaperSheet(pre);
-  else openActivitySheet({ ...pre, name: { playing: 'Playing', tummy_time: 'Tummy time', bath: 'Bath' }[pick] || '', note: pick === 'other' ? res.notes : '' });
+// Places used before, offered as suggestions in the "Where" boxes.
+function fillPlaces() {
+  const seen = new Map();
+  for (const e of events) {
+    const p = e.data.place ? String(e.data.place) : '';
+    if (p && !seen.has(p.toLowerCase())) seen.set(p.toLowerCase(), p);
+  }
+  $('#placeList').replaceChildren(...[...seen.values()].slice(0, 12).map((p) => h('option', { value: p })));
 }
 
 function openEdit(e) {
@@ -943,43 +1095,12 @@ function openEdit(e) {
   note.value = e.note || '';
   const endField = field('Ended', end.input, end.preview, h('div', { class: 'hint' }, 'Empty = still going. ',
     h('button', { type: 'button', class: 'linkish', onclick: () => { end.input.value = ''; end.show(); } }, 'Clear')));
-  const details = h('div');
-  let method = e.data.method;
-  let getData = () => e.data;
-
-  function draw() {
-    details.replaceChildren();
-    if (e.kind === 'feed') {
-      details.append(field('Type', seg([['breast', 'Breast'], ['bottle', 'Bottle']], method, (v) => { method = v; draw(); })));
-      if (method === 'breast') {
-        const side = seg([['left', 'Left'], ['right', 'Right'], ['both', 'Both']], e.data.side || 'left');
-        details.append(field('Side', side));
-        getData = () => ({ method: 'breast', side: side.get() });
-      } else {
-        const b = bottleFields(e.data.method === 'bottle' ? e.data : null);
-        details.append(...b.els);
-        getData = () => ({ method: 'bottle', ...b.get() });
-      }
-    } else if (e.kind === 'diaper') {
-      const cur = e.data.pee && e.data.poop ? 'both' : e.data.poop ? 'poop' : e.data.pee ? 'pee' : 'dry';
-      const d = seg([['pee', 'Pee'], ['poop', 'Poop'], ['both', 'Both'], ['dry', 'Dry']], cur);
-      details.append(field('What', d));
-      getData = () => ({ pee: ['pee', 'both'].includes(d.get()), poop: ['poop', 'both'].includes(d.get()) });
-    } else if (e.kind === 'activity') {
-      const nameIn = h('input', { class: 'txt', maxlength: 60 });
-      nameIn.value = e.data.name;
-      details.append(field('Activity', nameIn));
-      getData = () => ({ name: cleanName(nameIn.value) });
-    } else {
-      getData = () => ({});
-    }
-    const timed = e.kind === 'sleep' || (e.kind === 'feed' && method === 'breast') || (e.kind === 'activity' && !isPoint(e));
-    endField.classList.toggle('hidden', !timed);
-  }
-  draw();
+  const timed = (method) => e.kind === 'sleep' || (e.kind === 'feed' && method === 'breast') || (e.kind === 'activity' && !isPoint(e));
+  const det = detailsEditor(e.kind, e.data, (m) => endField.classList.toggle('hidden', !timed(m)));
+  endField.classList.toggle('hidden', !timed(e.data.method));
 
   const save = () => run(() => {
-    const body = { data: getData(), note: note.value };
+    const body = { data: det.get(), note: note.value };
     if (start.input.value !== origStart) { const d = start.read(); checkPast(d); body.start_at = d.toISOString(); }
     if (!endField.classList.contains('hidden') && end.input.value !== origEnd) {
       if (end.input.value) { const d = end.read(); checkPast(d); body.end_at = d.toISOString(); } else body.end_at = null;
@@ -992,14 +1113,622 @@ function openEdit(e) {
     run(() => del(e.id), 'Deleted', () => post({ kind: e.kind, start_at: e.start_at, end_at: e.end_at, data: e.data, note: e.note }));
   };
 
+  const ai = e.data.ai;
   openSheet(`Edit ${e.kind}`, e.kind, h('div', {},
-    details,
+    ai ? h('div', { class: 'hint' }, `✨ Logged with Claude${String(ai.source || '').includes('photo') ? ' from a photo' : ''}${ai.edited ? ' (edited before saving)' : ''}`) : null,
+    det.el,
     field(isPoint(e) ? 'Time' : 'Started', start.input, start.preview),
     endField,
+    det.placeField,
     field('Note', note),
     h('div', { class: 'actions-row' },
       h('button', { class: 'btn danger', onclick: remove }, 'Delete'),
       h('button', { class: 'btn primary', onclick: save }, 'Save'))));
+}
+
+// ---------- Claude: photo and/or words -> proposed entries -> review (the confirm stage) ----------
+// Claude only proposes. Nothing is written until the parent taps Save on the review screen.
+
+function aiBody(fields) {
+  const body = { ...fields, tz: TZ, unit: settings.unit };
+  const name = settings.name.trim().slice(0, 40);
+  if (name) body.baby_name = name;
+  return body;
+}
+function claudeMeta(res) {
+  const n = res.queries;
+  return ['Claude', typeof res.elapsed_ms === 'number' ? `${(res.elapsed_ms / 1000).toFixed(1)} s` : null,
+    typeof n === 'number' && n > 0 ? `${n} ${n === 1 ? 'query' : 'queries'}` : null].filter(Boolean).join(' · ');
+}
+const waiting = (text, since = Date.now()) => h('div', { class: 'wait' }, `${text} `,
+  h('span', { class: 'clock', 'data-clock': since }, fmtClock(Date.now() - since)));
+const cancelRow = () => h('div', { class: 'actions-row' }, h('button', { class: 'btn', onclick: closeSheet }, 'Cancel'));
+function failed(stage, msg, retry) {
+  stage.replaceChildren(h('div', { class: 'warn-text' }, msg),
+    h('div', { class: 'actions-row' },
+      h('button', { class: 'btn', onclick: closeSheet }, 'Cancel'),
+      retry ? h('button', { class: 'btn primary', onclick: retry }, 'Try again') : null));
+}
+
+// 📷 on the home screen: the sheet opens right away; Claude's answer turns it into the review screen.
+async function handlePhoto(file) {
+  const since = Date.now();
+  const ui = proposeSheet('From a photo');
+  ui.stage.replaceChildren(waiting('Claude is looking…', since), cancelRow());
+  let photo;
+  try {
+    photo = await preparePhoto(file);
+  } catch (e) {
+    if (ui.live()) failed(ui.stage, e.message, null);
+    return;
+  }
+  if (ui.live()) propose(ui, { photo }, since);
+}
+
+function proposeSheet(title) {
+  const head = h('div'), stage = h('div');
+  openSheet(title, 'ai', h('div', {}, head, stage));
+  return { head, stage, live: () => stage.isConnected };   // false once the sheet is closed or replaced
+}
+
+// req: {text?, photo?}. Ask Claude for proposals, then show them for review.
+async function propose(ui, req, since = Date.now()) {
+  ui.head.replaceChildren(...nodes(said(req, false), req.photo ? h('img', { class: 'photo', src: req.photo.src, alt: 'Your photo' }) : null));
+  ui.stage.replaceChildren(waiting(req.photo ? 'Claude is looking…' : 'Claude is reading…', since), cancelRow());
+  const body = aiBody({});
+  if (req.text) body.text = req.text.slice(0, 2000);
+  if (req.photo) {
+    body.image = req.photo.b64;
+    body.photo_taken_at = req.photo.when ? req.photo.when.toISOString() : null;
+  }
+  let res;
+  try {
+    res = await api('POST', '/api/ai/propose', body);
+  } catch (e) {
+    if (!ui.live()) return;
+    if (!req.photo) ui.head.replaceChildren(...said(req, true));   // a way back to the words, not just Cancel
+    failed(ui.stage, e.message, () => propose(ui, req));
+    return;
+  }
+  if (ui.live()) showReview(ui, req, res);
+}
+
+// What the parent told Claude, with a way back to fix it (dictation gets words wrong).
+function said(req, canChange) {
+  if (!req.text) return [];
+  return [h('div', { class: 'hint said' }, `“${req.text}”`, canChange && !req.photo
+    ? [' ', h('button', { type: 'button', class: 'linkish', onclick: () => openClaude({ text: req.text }) }, 'Change')] : null)];
+}
+
+// Photo only: tell Claude one more thing ("5 oz", "right side") and ask again with photo + text.
+function addDetail(ui, req, open) {
+  const input = h('input', { class: 'txt', maxlength: 2000, enterkeyhint: 'send', placeholder: 'e.g. "5 oz", "right side", "at grandma\'s"' });
+  input.value = req.text || '';
+  const go = () => { const text = input.value.trim(); if (text) propose(ui, { ...req, text }); else input.focus(); };
+  input.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); go(); } });
+  const box = h('div', { class: open ? '' : 'hidden' }, field('Tell Claude more about this photo', input),
+    h('button', { type: 'button', class: 'btn', onclick: go }, 'Ask again'));
+  const link = h('button', {
+    type: 'button', class: `linkish${open ? ' hidden' : ''}`,
+    onclick: () => { link.classList.add('hidden'); box.classList.remove('hidden'); input.focus(); },
+  }, '＋ Add a detail and ask again');
+  return h('div', { class: 'more' }, link, box);
+}
+
+function showReview(ui, req, res) {
+  sheetOpenedAt = Date.now();   // a tap aimed at the waiting screen must not land on Save
+  const source = ['photo', 'text', 'photo+text'].includes(res.source) ? res.source
+    : req.photo ? (req.text ? 'photo+text' : 'photo') : 'text';
+  const rv = { source, model: String(res.model || '').slice(0, 30), undo: [], saved: [] };
+  rv.cards = (Array.isArray(res.proposals) ? res.proposals : []).map(makeCard).filter(Boolean);
+  const none = !rv.cards.length;
+  const msg = h('div', { class: `ai-msg${none ? ' big' : ''}` },
+    res.message ? String(res.message) : none ? 'Claude found nothing to log.' : null,
+    h('div', { class: 'ai-meta' }, claudeMeta(res)));
+  ui.head.replaceChildren(...said(req, true),
+    h('div', { class: 'ai-head' }, req.photo ? h('img', { class: 'thumb', src: req.photo.src, alt: 'Your photo' }) : null, msg));
+  const more = req.photo ? addDetail(ui, req, none) : null;
+
+  if (none) {
+    const pre = { when: req.photo?.when || undefined };
+    const sheets = [['🍼 Feed', openFeedSheet], ['🧷 Diaper', openDiaperSheet], ['🌙 Sleep', openSleepSheet], ['⭐ Activity', openActivitySheet]];
+    ui.stage.replaceChildren(...nodes(
+      field('Log manually', h('div', { class: 'chips' }, sheets.map(([label, open]) => h('button', { type: 'button', class: 'chip', onclick: () => open(pre) }, label)))),
+      more,
+      h('div', { class: 'actions-row' }, h('button', { class: 'btn', onclick: closeSheet }, 'Close'))));
+    return;
+  }
+
+  const multi = rv.cards.length > 1;
+  const saveBtn = h('button', { class: 'btn primary', onclick: () => saveReview(rv) }, 'Save');
+  rv.redraw = () => {
+    rv.cards.forEach((c) => c.refresh());
+    const n = rv.cards.filter((c) => c.include && !c.done).length;
+    saveBtn.textContent = multi ? `Save ${n}` : 'Save';
+    saveBtn.disabled = !n;
+    if (rv.saved.length && more) more.remove();   // asking again now could log things twice
+  };
+  ui.stage.replaceChildren(...nodes(rv.cards.map((c) => renderCard(rv, c, multi)), more,
+    h('div', { class: 'actions-row sticky' }, h('button', { class: 'btn', onclick: closeSheet }, 'Cancel'), saveBtn)));
+  rv.redraw();
+}
+
+// One card per proposal. c.orig is Claude's entry; c.cur is what will be saved (changes with Edit).
+function makeCard(p) {
+  if (!p || typeof p !== 'object') return null;
+  const entry = (e) => ({ kind: e.kind, start_at: e.start_at, end_at: e.end_at ?? null, data: { ...(e.data || {}) }, note: String(e.note || '').trim() });
+  let orig, before = null;
+  if (p.op === 'create' && p.event && KINDS.includes(p.event.kind)) {
+    orig = entry(p.event);
+  } else if (p.op === 'update' && p.patch && (before = p.before || events.find((e) => e.id === p.id))) {
+    orig = entry(p.after || { ...before, ...p.patch });
+  } else {
+    return null;
+  }
+  const needsDur = p.op === 'create' && Array.isArray(p.needs) && p.needs.includes('duration') && orig.end_at == null;
+  return { p, before, orig, cur: entry(orig), needsDur, mins: null, include: true, edited: false, done: null };
+}
+// Claude knew the start but not how long (e.g. an old breastfeeding photo): "How long?" is required.
+const needsDuration = (c) => c.needsDur && !isPoint(c.cur);
+function finalEntry(c) {
+  const ev = JSON.parse(JSON.stringify(c.cur));
+  if (needsDuration(c)) ev.end_at = c.mins && ev.start_at ? new Date(ms(ev.start_at) + c.mins * 60e3).toISOString() : null;
+  return ev;
+}
+const canon = (d) => JSON.stringify(Object.keys(d).filter((k) => d[k] != null).sort().map((k) => [k, d[k]]));
+const sameEntry = (a, b) => a.start_at === b.start_at && a.end_at === b.end_at && a.note === b.note && canon(a.data) === canon(b.data);
+
+function renderCard(rv, c, multi) {
+  const title = h('div', { class: 'pc-title' });
+  const lead = h('div'), body = h('div');   // lead: the time line (or first change), right under the title
+  const check = multi ? h('button', {
+    type: 'button', class: 'pc-check', role: 'checkbox', 'aria-checked': 'true', 'aria-label': 'Include this entry',
+    onclick: () => { c.include = !c.include; check.setAttribute('aria-checked', String(c.include)); rv.redraw(); },
+  }, '✓') : null;
+  const editBtn = h('button', { type: 'button', class: 'btn pc-edit', onclick: () => toggleEdit() }, 'Edit');
+  const dur = c.needsDur ? durPicker('How long? (needed to save)', DURATIONS[c.cur.kind] || DURATIONS.activity) : null;
+  if (dur) dur.classList.add('need');
+  if (dur) for (const t of ['click', 'input']) dur.addEventListener(t, () => { c.mins = dur.get(); c.refresh(); });
+  const edWrap = h('div', { class: 'pc-editor hidden' });
+  let editor = null;
+  c.el = h('div', { class: `pcard ${c.cur.kind}` }, h('div', { class: 'pc-head' }, check, title, editBtn), lead, dur, body, edWrap);
+
+  function toggleEdit() {
+    if (!editor) {
+      editor = cardEditor(c, () => { c.cur = editor.read(); c.edited = !sameEntry(c.cur, c.orig); c.refresh(); });
+      edWrap.append(editor.el);
+    }
+    const open = !edWrap.classList.toggle('hidden');
+    editBtn.textContent = open ? 'Done' : 'Edit';
+  }
+  c.refresh = () => {
+    const ev = finalEntry(c);
+    c.el.classList.toggle('off', !c.include);
+    c.el.classList.toggle('done', !!c.done);
+    title.replaceChildren(...nodes(c.p.op === 'update' ? h('span', { class: 'tag' }, 'Change') : null, `${kindEmoji(ev)} ${describe(ev) || 'Activity'}`));
+    const [first, ...rest] = cardLines(c, ev);
+    lead.replaceChildren(first);
+    body.replaceChildren(...rest);
+    if (dur) dur.classList.toggle('hidden', !needsDuration(c) || !!c.done);
+    editBtn.classList.toggle('hidden', !!c.done);
+    if (check) check.classList.toggle('hidden', !!c.done);
+    if (c.done) edWrap.classList.add('hidden');
+  };
+  return c.el;
+}
+
+// The edit sheet's controls, inline in a card. onChange runs after every tap or keystroke.
+function cardEditor(c, onChange) {
+  const o = c.cur;
+  const moment = o.kind === 'activity' && o.end_at != null && o.end_at === o.start_at;
+  const det = detailsEditor(o.kind, o.data, () => layout());
+  const start = dtBox(o.start_at), end = dtBox(o.end_at);
+  const startIn = start.input.value, endIn = end.input.value;
+  const note = h('textarea', { class: 'txt', rows: 2, maxlength: 2000, placeholder: 'Optional' });
+  note.value = o.note;
+  const startField = field('Started', start.input, start.preview);
+  const endField = field('Ended', end.input, end.preview, h('div', { class: 'hint' }, 'Empty = still going. ',
+    h('button', { type: 'button', class: 'linkish', onclick: () => { end.input.value = ''; end.show(); } }, 'Clear')));
+  const point = () => { const d = det.get(); return o.kind === 'diaper' || (o.kind === 'feed' && d.method === 'bottle') || moment; };
+  function layout() {
+    startField.firstChild.textContent = point() ? 'Time' : 'Started';
+    endField.classList.toggle('hidden', point() || c.needsDur);
+  }
+  layout();
+  const el = h('div', {}, det.el, startField, endField, det.placeField, field('Note', note));
+  for (const t of ['input', 'change', 'click']) el.addEventListener(t, onChange);
+  const iso = (d) => (d && !isNaN(d) ? d.toISOString() : null);
+  return {
+    el,
+    read: () => {
+      const s = start.input.value === startIn ? o.start_at : iso(start.read());
+      let e;
+      if (point()) e = s;
+      else if (c.needsDur) e = null;   // comes from "How long?"
+      else if (end.input.value === endIn) e = o.end_at;
+      else e = end.input.value ? iso(end.read()) : null;
+      return { kind: o.kind, start_at: s, end_at: e, data: det.get(), note: note.value.trim() };
+    },
+  };
+}
+
+const clockAt = (t) => `${dayKey(t) === dayKey(Date.now()) ? '' : `${dayLabel(dayKey(t))} `}${fmtTime(t)}`;
+// "2:14 PM · 25m ago" · "Started 1:05 PM · running" · "1:05 PM – 2:40 PM · 1h 35m"
+function timeLine(ev, askDuration) {
+  if (!ev.start_at) return 'Pick a time';
+  const a = ms(ev.start_at), now = Date.now();
+  if (ev.end_at == null) {
+    if (askDuration) return `Started ${clockAt(a)} · how long?`;
+    return [`Started ${clockAt(a)} · running`, now - a >= 60e3 ? [' · ', h('span', { 'data-since': a }, fmtDur(now - a))] : null];
+  }
+  if (isPoint(ev)) return `${clockAt(a)} · ${now - a < 60e3 ? 'just now' : `${fmtDur(now - a)} ago`}`;
+  const b = ms(ev.end_at);
+  return `${clockAt(a)} – ${dayKey(a) === dayKey(b) ? fmtTime(b) : clockAt(b)} · ${fmtDur(b - a)}`;
+}
+
+function cardLines(c, ev) {
+  const out = [];
+  if (c.p.op === 'update') {
+    out.push(...changeLines(c.before, ev));
+  } else {
+    out.push(h('div', { class: 'pc-time' }, timeLine(ev, needsDuration(c))));
+    const bits = detailBits(ev);
+    if (bits.length) out.push(h('div', { class: 'pc-line' }, bits.join(' · ')));
+    if (ev.note) out.push(h('div', { class: 'pc-note' }, ev.note));
+  }
+  const care = stoolHint(ev);
+  if (care) out.push(h('div', { class: 'hint care' }, care));
+  const sure = typeof c.p.confidence === 'number' ? `${Math.round(c.p.confidence * 100)}% sure` : null;
+  const why = [c.p.why ? String(c.p.why) : null, sure, c.edited ? 'edited' : null].filter(Boolean).join(' · ');
+  if (why) out.push(h('div', { class: 'pc-why' }, why));
+  if (c.done) out.push(h('div', { class: 'pc-done' }, '✓ Saved'));
+  return out;
+}
+
+// An update card shows what changes: "End at 2:40 PM · slept 1h 35m", "Breast · Left → Breast · Right".
+function changeLines(b, a) {
+  const out = [];
+  const line = (...kids) => out.push(h('div', { class: 'pc-time' }, ...kids));
+  const full = (e) => [describe(e), ...detailBits(e)].join(' · ');
+  if (full(b) !== full(a)) line(`${full(b)} → ${full(a)}`);
+  if (a.start_at !== b.start_at) line(`Start ${clockAt(ms(b.start_at))} → ${a.start_at ? clockAt(ms(a.start_at)) : '?'}`);
+  if (a.end_at !== b.end_at && !isPoint(a) && a.start_at) {
+    const took = a.end_at ? fmtDur(ms(a.end_at) - ms(a.start_at)) : '';
+    if (!a.end_at) line('Keep it running (no end time)');
+    else if (!b.end_at) line(`End at ${clockAt(ms(a.end_at))}`, h('span', { class: 'muted' }, ` · ${a.kind === 'sleep' ? 'slept' : 'lasted'} ${took}`));
+    else line(`End ${clockAt(ms(b.end_at))} → ${clockAt(ms(a.end_at))}`, h('span', { class: 'muted' }, ` · ${took}`));
+  }
+  if ((a.note || '') !== (b.note || '')) out.push(h('div', { class: 'pc-note' }, h('span', { class: 'muted' }, 'Note: '), a.note || '(removed)'));
+  if (!out.length) line('No change');
+  if (a.start_at === b.start_at) {
+    const t = clockAt(ms(b.start_at));
+    out.push(h('div', { class: 'pc-line muted' }, b.end_at == null ? `Running since ${t}` : isPoint(b) ? `At ${t}` : `Started ${t}`));
+  }
+  return out;
+}
+
+function checkProposal(c, ev, many) {
+  try {
+    if (needsDuration(c) && !c.mins) throw new Error('How long did it last? Pick a duration.');
+    if (!ev.start_at) throw new Error('Pick a valid time');
+    checkPast(new Date(ev.start_at));
+    if (ev.end_at && ms(ev.end_at) > Date.now() + 60e3) throw new Error('That would end in the future. Pick a shorter time.');
+    if (ev.end_at && ms(ev.end_at) < ms(ev.start_at)) throw new Error('The end is before the start.');
+    if (ev.kind === 'activity' && !cleanName(ev.data.name)) throw new Error('Pick or type an activity');
+  } catch (e) {
+    c.el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    throw new Error(many ? `${describe(ev) || 'Activity'}: ${e.message}` : e.message);
+  }
+}
+
+const entryBody = (e) => ({ start_at: e.start_at, end_at: e.end_at, data: e.data, note: e.note });
+const conf01 = (x) => (typeof x === 'number' && x >= 0 && x <= 1 ? x : null);
+
+// Save the chosen cards: updates first (they refer to rows as Claude saw them), then new entries
+// oldest first. One toast; its Undo reverts everything this review saved.
+function saveReview(rv) {
+  return run(async () => {
+    const todo = rv.cards.filter((c) => c.include && !c.done).map((c) => ({ c, ev: finalEntry(c) }));
+    if (!todo.length) throw new Error('Nothing selected');
+    todo.forEach(({ c, ev }) => checkProposal(c, ev, rv.cards.length > 1));
+    await load();   // current running timers and rows (another phone may have logged meanwhile)
+    const updates = todo.filter((x) => x.c.p.op === 'update');
+    const creates = todo.filter((x) => x.c.p.op === 'create').sort((x, y) => ms(x.ev.start_at) - ms(y.ev.start_at));
+    const done = (c, r) => { c.done = r; rv.saved.push({ c, r }); remember(r); };
+    try {
+      for (const { c, ev } of updates) {
+        const before = events.find((e) => e.id === c.p.id) || c.before;
+        const r = await patch(c.p.id, c.edited ? entryBody(ev) : c.p.patch);
+        rv.undo.push(() => patch(r.id, entryBody(before)));
+        done(c, r);
+      }
+      for (const { c, ev } of creates) {
+        const data = { ...ev.data, ai: { source: rv.source, model: rv.model, confidence: conf01(c.p.confidence), edited: c.edited } };
+        if (ev.end_at == null) {   // a new running timer: same rule as the Start buttons
+          const prev = await endRunning(ev.kind, data.name, ms(ev.start_at));
+          if (prev) rv.undo.push(() => patch(prev.id, { end_at: prev.end_at }));
+        }
+        const r = await post({ kind: ev.kind, start_at: ev.start_at, end_at: ev.end_at, data, note: ev.note });
+        rv.undo.push(() => del(r.id));
+        done(c, r);
+      }
+    } catch (e) {
+      if (rv.saved.length) { rv.redraw(); load(); }   // show what did get saved; Save again only does the rest
+      throw e;
+    }
+    return rv.saved;
+  }, savedText, () => undoAll(rv.undo));
+}
+function savedText(saved) {
+  if (saved.length !== 1) return `Saved ${saved.length} entries`;
+  const { c, r } = saved[0];
+  if (c.p.op === 'update') return `Updated: ${describe(r)}`;
+  return `Saved: ${describe(r)}${r.end_at == null ? ' (running)' : ''}${atText(r.start_at)}`;
+}
+async function undoAll(steps) {
+  let err = null;
+  for (const step of [...steps].reverse()) {
+    try { await step(); } catch (e) { err = err || e; }
+  }
+  if (err) throw err;
+}
+
+// ---------- ✨ Claude sheet: tell it what happened, or ask about the log ----------
+const QUESTION_START = /^(when|how|what|is|are|was|were|did|does|do|has|have|why|which|who|can|could|should|summary|summarize)\b/i;
+const looksLikeQuestion = (s) => /\?\s*$/.test(s) || QUESTION_START.test(s);
+
+function openClaude(pre = {}) {
+  const who = settings.name.trim() || 'the baby';
+  let photo = pre.photo || null;
+  const box = h('textarea', {
+    class: 'txt', rows: 4, maxlength: 2000, enterkeyhint: 'send', 'aria-label': 'Tell or ask Claude',
+    placeholder: `Tell Claude what happened ("4 oz formula at 3, then a poopy diaper") or ask ("when did ${who} last poop?")`,
+  });
+  box.value = pre.text || '';
+  const askBtn = h('button', { class: 'btn', onclick: () => ask() }, 'Ask');
+  const logBtn = h('button', { class: 'btn', onclick: () => log() }, 'Log it');
+  const quick = [
+    [`When did ${who} last eat?`],
+    [`When did ${who} last poop?`],
+    ['Last 24 hours', 'Give me a quick summary of the last 24 hours: feeds, diapers, and sleep.'],
+    ['Summary for the doctor (2 weeks)', 'Write a summary of the last 2 weeks for the pediatrician: feeding, diapers, sleep, and anything notable.'],
+  ];
+  const chips = field('Quick questions', h('div', { class: 'chips' },
+    quick.map(([label, q]) => h('button', { type: 'button', class: 'chip', onclick: () => openAsk(q || label) }, label))));
+  const photoIn = h('input', { type: 'file', accept: 'image/*', class: 'visually-hidden' });
+  const attach = h('div', { class: 'attach' });
+  const drawAttach = () => attach.replaceChildren(...(photo
+    ? [h('img', { class: 'thumb', src: photo.src, alt: 'Attached photo' }),
+      h('button', { type: 'button', class: 'linkish', onclick: () => { photo = null; drawAttach(); update(); } }, 'Remove photo')]
+    : [h('label', { class: 'chip' }, photoIn, '📷 Add a photo'), h('span', { class: 'hint' }, "or tap the keyboard's 🎤 to dictate")]));
+  photoIn.addEventListener('change', async () => {
+    const file = photoIn.files && photoIn.files[0];
+    photoIn.value = '';
+    if (!file) return;
+    attach.replaceChildren(h('span', { class: 'hint' }, 'Preparing photo…'));
+    try { photo = await preparePhoto(file); } catch (e) { toast(e.message); }
+    drawAttach();
+    update();
+  });
+  // The likely action is the primary button: Ask for questions, Log it for everything else.
+  function update() {
+    const text = box.value.trim();
+    const q = !photo && looksLikeQuestion(text);
+    askBtn.classList.toggle('primary', q);
+    logBtn.classList.toggle('primary', !q);
+    chips.classList.toggle('hidden', !!text || !!photo);
+  }
+  function log() {
+    const text = box.value.trim();
+    if (!text && !photo) { toast('Type or dictate what happened first'); box.focus(); return; }
+    propose(proposeSheet(photo && !text ? 'From a photo' : '✨ Claude'), { text, photo });
+  }
+  function ask() {
+    const q = box.value.trim();
+    if (!q) { toast('Type a question first'); box.focus(); return; }
+    openAsk(q);
+  }
+  box.addEventListener('input', update);
+  box.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter' && !ev.shiftKey && !ev.isComposing) { ev.preventDefault(); (askBtn.classList.contains('primary') ? ask : log)(); }
+  });
+  drawAttach();
+  update();
+  openSheet('✨ Claude', 'ai tall', h('div', {}, field('', box), h('div', { class: 'actions-row' }, askBtn, logBtn), attach, chips));
+  box.focus();
+}
+
+// ---------- Ask: Claude reads the log (read-only) and answers in markdown ----------
+function openAsk(question) {
+  const turns = [];   // this sheet's conversation; earlier turns go along as history for follow-ups
+  const list = h('div');
+  const follow = h('textarea', { class: 'txt', rows: 1, maxlength: 1000, enterkeyhint: 'send', placeholder: 'Ask a follow-up…', 'aria-label': 'Follow-up question' });
+  const sendBtn = h('button', { class: 'btn primary', onclick: () => send(follow.value.trim()) }, 'Ask');
+  follow.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter' && !ev.shiftKey && !ev.isComposing) { ev.preventDefault(); send(follow.value.trim()); }
+  });
+  openSheet('✨ Claude', 'ai tall', h('div', {}, list, h('div', { class: 'follow' }, follow, sendBtn)));
+  let asking = false;
+
+  function send(q) {
+    if (!q || asking) return;
+    follow.value = '';
+    const t = { q: q.slice(0, 1000), a: null, qEl: h('div', { class: 'q' }, q), body: h('div') };
+    turns.push(t);
+    list.append(h('div', { class: 'turn' }, t.qEl, t.body));
+    ask(t);
+  }
+  async function ask(t) {
+    if (asking) return;
+    asking = true;
+    sendBtn.disabled = true;
+    t.body.replaceChildren(waiting('Claude is reading the log…'));
+    t.qEl.scrollIntoView({ block: 'start' });
+    const history = turns.slice(0, turns.indexOf(t)).filter((x) => x.a != null).slice(-6).map((x) => ({ q: x.q, a: x.a.slice(0, 4000) }));
+    try {
+      const res = await api('POST', '/api/ai/ask', aiBody({ question: t.q, history }));
+      if (!t.body.isConnected) return;
+      t.a = String(res.answer ?? '');
+      t.body.replaceChildren(renderMarkdown(t.a), h('div', { class: 'meta-row' }, h('span', {}, claudeMeta(res)),
+        h('button', { type: 'button', class: 'btn small', onclick: () => copyText(mdPlain(t.a)) }, 'Copy')));
+      t.qEl.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    } catch (e) {
+      if (!t.body.isConnected) return;
+      t.body.replaceChildren(h('div', { class: 'warn-text' }, e.message),
+        h('button', { type: 'button', class: 'btn', onclick: () => ask(t) }, 'Try again'));
+    } finally {
+      asking = false;
+      sendBtn.disabled = false;
+    }
+  }
+  send(question);
+}
+
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {   // older browsers / no permission: the selection fallback
+    const ta = h('textarea', { class: 'visually-hidden' });
+    ta.value = text;
+    document.body.append(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    ta.remove();
+    if (!ok) { toast("Couldn't copy"); return; }
+  }
+  toast('Copied');
+}
+
+// ---------- tiny markdown renderer (Claude's answers) ----------
+// Builds DOM nodes with h(), so model text only ever lands in text nodes: never in innerHTML.
+// Headings, paragraphs, **bold**, *italic*, `code`, bullet/numbered lists (nested), tables, quotes, rules.
+const MD_FENCE = /^\s*```/;
+const MD_HEADING = /^\s{0,3}(#{1,6})\s+(.*?)(?:\s+#+)?\s*$/;
+const MD_HR = /^\s{0,3}([-*_])(?:\s*\1){2,}\s*$/;
+const MD_LIST = /^(\s*)([-*+]|\d{1,3}[.)])\s+(.*)$/;
+const MD_QUOTE = /^\s*>/;
+const MD_TABLE_SEP = /^\s*\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)*\|?\s*$/;
+const MD_INLINE = /`([^`\n]+)`|\*\*(.+?)\*\*|\*(?![\s*])(.+?)\*|\[([^\]\n]+)\]\((?:[^()\s]|\([^()\s]*\))*\)|(<br\s*\/?>)/gi;
+const mdTableAt = (lines, i) => lines[i].includes('|') && i + 1 < lines.length && lines[i + 1].includes('-') && MD_TABLE_SEP.test(lines[i + 1]);
+const mdBlockAt = (lines, i) => MD_FENCE.test(lines[i]) || MD_HEADING.test(lines[i]) || MD_HR.test(lines[i])
+  || MD_LIST.test(lines[i]) || MD_QUOTE.test(lines[i]) || mdTableAt(lines, i);
+
+function mdInline(s) {
+  const out = [];
+  let last = 0;
+  for (const m of s.matchAll(MD_INLINE)) {
+    if (m.index > last) out.push(s.slice(last, m.index));
+    if (m[1] != null) out.push(h('code', {}, m[1]));
+    else if (m[2] != null) out.push(h('strong', {}, mdInline(m[2])));
+    else if (m[3] != null) out.push(h('em', {}, mdInline(m[3])));
+    else if (m[4] != null) out.push(m[4]);   // links: keep the text only
+    else out.push(h('br'));
+    last = m.index + m[0].length;
+  }
+  if (last < s.length) out.push(s.slice(last));
+  return out;
+}
+
+function renderMarkdown(src) {
+  const lines = String(src || '').replace(/\r\n?/g, '\n').split('\n');
+  const root = h('div', { class: 'md' });
+  let i = 0, m;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (!line.trim()) {
+      i++;
+    } else if (MD_FENCE.test(line)) {
+      const code = [];
+      for (i++; i < lines.length && !MD_FENCE.test(lines[i]); i++) code.push(lines[i]);
+      i++;
+      root.append(h('pre', {}, h('code', {}, code.join('\n'))));
+    } else if ((m = MD_HEADING.exec(line))) {
+      root.append(h(['h3', 'h3', 'h4', 'h5', 'h5', 'h5'][m[1].length - 1], {}, mdInline(m[2])));
+      i++;
+    } else if (MD_HR.test(line)) {
+      root.append(h('hr'));
+      i++;
+    } else if (mdTableAt(lines, i)) {
+      i = mdTable(lines, i, root);
+    } else if (MD_LIST.test(line)) {
+      i = mdList(lines, i, root);
+    } else if (MD_QUOTE.test(line)) {
+      const quote = [];
+      for (; i < lines.length && MD_QUOTE.test(lines[i]); i++) quote.push(lines[i].replace(/^\s*>\s?/, ''));
+      root.append(h('blockquote', {}, [...renderMarkdown(quote.join('\n')).childNodes]));
+    } else {   // paragraph: keeps single line breaks (chat answers use them)
+      const para = [line.trim()];
+      for (i++; i < lines.length && lines[i].trim() && !mdBlockAt(lines, i); i++) para.push(lines[i].trim());
+      root.append(h('p', {}, para.map((l, j) => [j ? h('br') : null, mdInline(l)])));
+    }
+  }
+  return root;
+}
+
+function mdTable(lines, i, root) {
+  const cells = (l) => l.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim());
+  const head = cells(lines[i]);
+  const align = cells(lines[i + 1]).map((c) => (/^:-+:$/.test(c) ? 'center' : /-:$/.test(c) ? 'right' : ''));
+  const rows = [];
+  for (i += 2; i < lines.length && lines[i].includes('|') && lines[i].trim(); i++) rows.push(cells(lines[i]));
+  const cell = (tag, text, j) => {
+    const el = h(tag, {}, mdInline(text));
+    if (align[j]) el.style.textAlign = align[j];
+    return el;
+  };
+  root.append(h('div', { class: 'tbl' }, h('table', {},
+    h('thead', {}, h('tr', {}, head.map((t, j) => cell('th', t, j)))),
+    h('tbody', {}, rows.map((r) => h('tr', {}, head.map((_, j) => cell('td', r[j] ?? '', j))))))));
+  return i;
+}
+
+function mdList(lines, i, root) {
+  const stack = [];   // open lists, innermost last: {indent, el}
+  let li = null;
+  while (i < lines.length) {
+    const m = MD_LIST.exec(lines[i]);
+    if (!m) {
+      if (!lines[i].trim()) {   // a blank line continues the list only if another item follows
+        let j = i;
+        while (j < lines.length && !lines[j].trim()) j++;
+        if (j < lines.length && MD_LIST.test(lines[j])) { i = j; continue; }
+        break;
+      }
+      if (li && /^\s/.test(lines[i]) && !mdBlockAt(lines, i)) {   // wrapped text of the item above
+        li.append(h('br'), ...mdInline(lines[i].trim()));
+        i++;
+        continue;
+      }
+      break;
+    }
+    const indent = m[1].replace(/\t/g, '    ').length;
+    const ordered = /\d/.test(m[2]);
+    while (stack.length > 1 && indent < stack[stack.length - 1].indent) stack.pop();
+    let top = stack[stack.length - 1];
+    const nested = top && li && indent >= top.indent + 2;
+    if (!top || nested || top.el.tagName !== (ordered ? 'OL' : 'UL')) {   // a new list: first, deeper, or bullets <-> numbers
+      const el = h(ordered ? 'ol' : 'ul', { start: ordered && parseInt(m[2], 10) !== 1 ? parseInt(m[2], 10) : null });
+      if (!top) root.append(el);
+      else if (nested) li.append(el);
+      else { top.el.after(el); stack.pop(); }
+      stack.push((top = { indent, el }));
+    }
+    li = h('li', {}, mdInline(m[3]));
+    top.el.append(li);
+    i++;
+  }
+  return i;
+}
+
+// Plain text for Copy: no markdown symbols, bullets kept, table rows as "a | b".
+function mdPlain(src) {
+  return String(src || '').replace(/\r\n?/g, '\n').split('\n')
+    .filter((l) => !MD_TABLE_SEP.test(l))
+    .map((l) => l.replace(/^\s{0,3}#{1,6}\s+/, '').replace(/^(\s*)[-*+]\s+/, '$1• ')
+      .replace(/^\s*\|(.*)\|\s*$/, (_, row) => row.split('|').map((c) => c.trim()).join(' | ')))
+    .join('\n')
+    .replace(/\*\*(.+?)\*\*/g, '$1').replace(/\*(?![\s*])(.+?)\*/g, '$1').replace(/`([^`\n]+)`/g, '$1')
+    .replace(/<br\s*\/?>/gi, ' ').trim();
 }
 
 function openSettings() {
@@ -1021,6 +1750,7 @@ function openSettings() {
 
 // ---------- boot ----------
 $('#settingsBtn').addEventListener('click', openSettings);
+$('#claudeBtn').addEventListener('click', () => openClaude());
 $('#photoInput').addEventListener('change', (ev) => {
   const file = ev.target.files && ev.target.files[0];
   ev.target.value = '';   // allow choosing the same photo again
