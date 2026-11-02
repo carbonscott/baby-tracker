@@ -109,6 +109,8 @@
     display: flex; align-items: center; gap: 16px; padding: 12px 16px;
     background: #2c323b; border-radius: 12px; box-shadow: 0 6px 24px rgba(0, 0, 0, .45); }
   .toast .link { background: none; border: 0; color: #7fb2ff; font-weight: 700; }
+  /* over an open sheet (errors like "Pick how long it lasted"): show at the top so it never covers Save */
+  .toast.top { top: calc(12px + env(safe-area-inset-top)); bottom: auto; }
 
   /* Claude: photo / text -> proposed entries -> review; ask the log */
   .ai { --c: #6ea0f7; }
@@ -184,7 +186,8 @@
   .md blockquote { margin: 8px 0; padding-left: 10px; border-left: 3px solid var(--line); color: var(--muted); }
   .md hr { margin: 12px 0; border: 0; border-top: 1px solid var(--line); }
   .md .tbl { margin: 8px 0; overflow-x: auto; }
-  .md table { border-collapse: collapse; font-size: 14px; font-variant-numeric: tabular-nums; }
+  /* break-word (not .md's anywhere): columns stay at least one word wide ("Diapers", not "Diape|rs"); .tbl scrolls */
+  .md table { border-collapse: collapse; font-size: 14px; font-variant-numeric: tabular-nums; overflow-wrap: break-word; }
   .md th, .md td { padding: 6px 10px 6px 0; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
   .md th { color: var(--muted); font-weight: 600; white-space: nowrap; }
 </style>
@@ -642,6 +645,7 @@ function toast(msg, undo) {
   const el = $('#toast');
   el.replaceChildren(...[h('span', {}, msg),
     undo ? h('button', { class: 'link', onclick: () => { hideToast(); run(undo, 'Undone'); } }, 'Undo') : null].filter(Boolean));
+  el.classList.toggle('top', sheetOpen());
   el.classList.remove('hidden');
   clearTimeout(toastTimer);
   toastTimer = setTimeout(hideToast, undo ? 7000 : 4000);

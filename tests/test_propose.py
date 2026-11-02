@@ -193,6 +193,20 @@ class CreateTest(unittest.TestCase):
         for it in (None, "x", [], {"op": "delete", "id": 7}, item(kind="bath"), item(op=None)):
             self.assertIsNone(change(it), it)
 
+    def test_row_ids_never_reach_the_parent(self):
+        ids = [9, 8, 7]
+        for said, shown in [
+            ("Already in the log (#7), so nothing new.", "Already in the log, so nothing new."),
+            ("That nap (#9, from 1:05 pm) is still running.", "That nap (from 1:05 pm) is still running."),
+            ("Sleep timer #9 was still running; ending it.", "Sleep timer was still running; ending it."),
+            ("Matches diaper #7.", "Matches diaper."),
+            ("bottle #2 of the day; #90 too", "bottle #2 of the day; #90 too"),   # not ids Claude was shown
+        ]:
+            self.assertEqual(propose_ai.scrub_ids(said, ids), shown)
+        c = change(item(op="update", id=9, kind="sleep", end="2026-11-02T13:50", why="woke up; #9 was running",
+                        note="Woke (#9) happy"))
+        self.assertEqual((c["why"], c["patch"]["note"]), ("woke up; was running", "Woke happy"))
+
     def test_confidence_and_why(self):
         self.assertEqual(change(item(kind="sleep", timing="running", confidence=85))["confidence"], 0.85)
         self.assertIsNone(change(item(kind="sleep", timing="running", confidence="high"))["confidence"])
@@ -256,11 +270,66 @@ class SideAndTimersTest(unittest.TestCase):
         c = ctx()
         new_sleep = change(item(kind="sleep", start="2026-11-02T13:40", timing="running"), c)
         with redirect_stderr(io.StringIO()):
-            self.assertEqual(propose_ai.drop_duplicate_timers([new_sleep], c), [])
+            self.assertEqual(propose_ai.drop_double_logs([new_sleep], c), [])
         end_old = change(item(op="update", id=9, kind="sleep", end="2026-11-02T13:30"), c)
-        self.assertEqual(propose_ai.drop_duplicate_timers([end_old, new_sleep], c), [end_old, new_sleep])
+        self.assertEqual(propose_ai.drop_double_logs([end_old, new_sleep], c), [end_old, new_sleep])
         walk = change(item(kind="activity", activity_name="Walk", timing="running"), c)
-        self.assertEqual(propose_ai.drop_duplicate_timers([walk], c), [walk])
+        self.assertEqual(propose_ai.drop_double_logs([walk], c), [walk])
+
+    def test_double_logs_dropped(self):
+        c = ctx()
+        keep = lambda changes: [x for x in propose_ai.drop_double_logs(changes, c)]
+        with redirect_stderr(io.StringIO()) as err:
+            # a sleep overlapping the running nap #9 (13:05-): dropped; one that ends before it: kept
+            overlap = change(item(kind="sleep", start="2026-11-02T12:30", end="2026-11-02T13:30", timing="range"), c)
+            before = change(item(kind="sleep", start="2026-11-02T10:00", end="2026-11-02T13:05", timing="range"), c)
+            self.assertEqual(keep([overlap, before]), [before])
+            # an old photo of a nap that's already logged (needs duration inside #9): dropped
+            inside = change(item(kind="sleep", start="2026-11-02T13:30", timing="needs_duration"), c)
+            self.assertEqual(keep([inside]), [])
+            # a breast feed inside the logged one #8 (12:40-12:55); a bottle at that time is fine
+            feed = change(item(start="2026-11-02T12:45", end="2026-11-02T12:50", timing="range", method="breast",
+                               side="right"), c)
+            bottle = change(item(start="2026-11-02T12:45", method="bottle", amount=60), c)
+            self.assertEqual(keep([feed, bottle]), [bottle])
+            # the same diaper twice (within 5 min, same details): dropped; other details or 10 min later: kept
+            same = change(item(kind="diaper", start="2026-11-02T12:33", pee=True, poop=False), c)
+            dirty = change(item(kind="diaper", start="2026-11-02T12:31", pee=True, poop=True), c)
+            later = change(item(kind="diaper", start="2026-11-02T12:40", pee=True, poop=False), c)
+            self.assertEqual(keep([same, dirty, later]), [dirty, later])
+            # two overlapping sleeps proposed together: the second is dropped
+            a = change(item(kind="sleep", start="2026-11-02T08:00", end="2026-11-02T09:00", timing="range"), c)
+            b = change(item(kind="sleep", start="2026-11-02T08:30", end="2026-11-02T09:30", timing="range"), c)
+            self.assertEqual(keep([a, b]), [a])
+            # an activity of another name may overlap; the same name may not
+            walk = change(item(kind="activity", activity_name="Walk", start="2026-11-02T11:00", timing="moment"), c)
+            tummy = change(item(kind="activity", activity_name="tummy time", start="2026-11-02T11:02", timing="moment"), c)
+            self.assertEqual(keep([walk, tummy]), [walk])   # #6 Tummy time at 11:00
+        self.assertIn("overlaps #9", err.getvalue())
+
+    def test_overlap_judged_after_this_batch_s_updates(self):
+        c = ctx()
+        fix = change(item(op="update", id=9, kind="sleep", start="2026-11-02T13:20"), c)   # nap now starts 13:20
+        early = change(item(kind="sleep", start="2026-11-02T12:00", end="2026-11-02T13:15", timing="range"), c)
+        self.assertEqual(propose_ai.drop_double_logs([fix, early], c), [fix, early])
+        moved = change(item(op="update", id=8, kind="feed", start="2026-11-02T12:20"), c)   # feed #8 12:20-12:55
+        clash = change(item(start="2026-11-02T12:25", end="2026-11-02T12:35", timing="range", method="breast",
+                            side="left"), c)
+        with redirect_stderr(io.StringIO()):
+            self.assertEqual(propose_ai.drop_double_logs([moved, clash], c), [moved])
+
+    def test_left_on_timer_hint(self):
+        stale = row(20, "sleep", "2026-11-02T17:00:00Z", None)            # 09:00, still "running"
+        evs = [row(21, "feed", "2026-11-02T19:30:00Z", "2026-11-02T19:45:00Z", {"method": "breast", "side": "left"}),
+               row(22, "diaper", "2026-11-02T18:00:00Z", "2026-11-02T18:00:00Z", {"pee": True}), stale]
+        text = propose_ai.build_context(ctx(events=evs), None)
+        self.assertIn("#20 | 2026-11-02 09:00, RUNNING (5h 00m so far; probably left on: a breast feed at 11:30"
+                      " was logged after it started) | sleep", text)
+        feed = row(30, "feed", "2026-11-02T21:00:00Z", None, {"method": "breast", "side": "left"})
+        self.assertNotIn("probably left on", propose_ai.build_context(ctx(events=[feed] + evs[1:2]), None))
+        nap = row(31, "sleep", "2026-11-02T21:00:00Z", None)              # a diaper during a nap is normal
+        later_diaper = row(32, "diaper", "2026-11-02T21:30:00Z", "2026-11-02T21:30:00Z", {"pee": True})
+        self.assertNotIn("probably left on", propose_ai.build_context(ctx(events=[later_diaper, nap]), None))
 
 
 class ContextTest(unittest.TestCase):
@@ -291,6 +360,41 @@ class ContextTest(unittest.TestCase):
         json.dumps(propose_ai.OUTPUT_SCHEMA)
         self.assertEqual(set(propose_ai.ITEM_SCHEMA["required"]) - set(propose_ai.ITEM_SCHEMA["properties"]), set())
 
+
+
+class EffortTest(unittest.TestCase):
+    def test_parse(self):
+        with redirect_stderr(io.StringIO()) as err:
+            self.assertEqual([propose_ai._effort(v) for v in ("low", " HIGH ", "", None, "default", "turbo")],
+                             ["low", "high", None, None, None, None])
+        self.assertIn("ignoring BABY_AI_EFFORT='turbo'", err.getvalue())
+
+    def test_defaults(self):
+        import importlib
+
+        def load(**env):
+            with mock.patch.dict(os.environ, env):
+                for k in ("BABY_AI_MODEL", "BABY_PHOTO_MODEL", "BABY_AI_EFFORT"):
+                    if k not in env:
+                        os.environ.pop(k, None)
+                m = importlib.reload(propose_ai)
+                return m.MODEL, m.EFFORT
+        try:
+            self.assertEqual(load(), ("sonnet", "low"))   # the default model runs at low effort
+            self.assertEqual(load(BABY_AI_EFFORT="default"), ("sonnet", None))
+            self.assertEqual(load(BABY_AI_MODEL="haiku"), ("haiku", None))   # another model: Claude Code's default
+            self.assertEqual(load(BABY_PHOTO_MODEL="opus"), ("opus", None))
+            self.assertEqual(load(BABY_AI_MODEL="haiku", BABY_AI_EFFORT="medium"), ("haiku", "medium"))
+        finally:
+            importlib.reload(propose_ai)
+
+    def test_passed_to_claude(self):
+        run, calls = fake_claude({"message": "", "items": []})
+        with mock.patch.object(claude_ai, "run_claude", run), mock.patch.object(propose_ai, "EFFORT", "medium"), \
+                redirect_stderr(io.StringIO()):
+            propose_ai.propose(text="hi", jpeg=None, photo_taken_at=None, tz="America/Los_Angeles", baby_name="",
+                               unit="ml", recent_events=[], activity_names=[], now=NOW)
+        self.assertEqual((calls[0][1]["effort"], calls[0][1]["model"]), ("medium", propose_ai.MODEL))
 
 # ---------- server ----------
 

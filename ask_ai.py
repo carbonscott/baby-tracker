@@ -231,7 +231,8 @@ def build_snapshot(rows: list[dict], tz: str, now: dt.datetime) -> sqlite3.Conne
             "start_utc": _utc(start), "end_utc": None if running else _utc(end or start),
             "start_local": _loc(start, zone), "end_local": None if running else _loc(end or start, zone),
             "local_date": local.date().isoformat(), "local_hour": local.hour, "night_of": _night_of(local),
-            "duration_min": _min(start, stop) if timed else None, "running": int(running),
+            # running: minutes so far (0 when its start is a few seconds ahead of the server's clock)
+            "duration_min": _min(start, stop) if timed or running else None, "running": int(running),
             "name": r.get("name"), "method": method, "side": r.get("side"), "milk": r.get("milk"),
             "amount_ml": r.get("amount_ml"), "pee": r.get("pee"), "poop": r.get("poop"),
             "color": r.get("color"), "texture": r.get("texture"), "place": r.get("place"),

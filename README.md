@@ -115,15 +115,18 @@ Claude Code prefers `ANTHROPIC_API_KEY` over the subscription login when it is s
    To go back to the subscription, delete that line (or file) and restart.
 
 Optional knobs (same env file): `BABY_AI_MODEL` for photo/text proposals (default `sonnet`;
-the old `BABY_PHOTO_MODEL` still works), `BABY_AI_TIMEOUT` (seconds, default 45),
+the old `BABY_PHOTO_MODEL` still works), `BABY_AI_EFFORT` (default `low` for the default
+model; `default` leaves it to Claude Code), `BABY_AI_TIMEOUT` (seconds, default 45),
 `BABY_ASK_MODEL` for questions (default `sonnet`), `BABY_ASK_TIMEOUT` (seconds, default 120).
+Sonnet at low effort was the most accurate and fastest of the configurations tested: ~3 s for a
+photo, ~5 s for a sentence with several events.
 
 ### Troubleshooting
 
 | Message in the app | Fix |
 |---|---|
 | Claude login is missing or expired | `claude auth login` on the VM (above) |
-| Photo AI isn't set up on the server | Run the server with `.venv/bin/python` (Setup above) |
+| Claude features aren't set up on the server | Run the server with `.venv/bin/python` (Setup above) |
 | Claude didn't answer within 45 s (or 120 s) | Retry; check `journalctl -u baby-tracker` |
 | Claude usage limit reached | Wait for the plan limit to reset, or switch to API credits |
 
@@ -132,9 +135,12 @@ the old `BABY_PHOTO_MODEL` still works), `BABY_AI_TIMEOUT` (seconds, default 45)
 | Path | What |
 |---|---|
 | `server.py` | HTTP server + JSON API + SQLite storage + daily backups (stdlib only) |
-| `photo_ai.py` | Photo → activity suggestion via the Claude Agent SDK (needs `.venv`) |
+| `claude_ai.py` | Shared Claude plumbing: runs Claude Code via the Agent SDK with no tools or personal settings (needs `.venv`) |
+| `propose_ai.py` | Photo and/or text → proposed entries (prompt, answer schema, log context, local time → UTC) |
+| `ask_ai.py` | Questions about the log: in-memory copy of the log + one read-only `sql` tool |
+| `tests/` | `python -m unittest discover -s tests` (no Claude calls) |
 | `static/index.html` | The whole UI (vanilla JS, no build step) |
-| `.venv/` | Python env with `claude-agent-sdk` and `pillow` (not needed for the core tracker) |
+| `.venv/` | Python env with `claude-agent-sdk` and `pillow` (only the Claude features need it) |
 | `deploy/baby-tracker.service` | systemd unit (installed to `/etc/systemd/system/`) |
 | `data/baby.db` | The data. Back this up. |
 
@@ -160,7 +166,7 @@ One table, `events`. Every row is one thing that happened.
 |---|---|---|
 | `feed` (breast) | `{"method":"breast","side":"left"\|"right"\|"both"}` | `end_at - start_at` |
 | `feed` (bottle) | `{"method":"bottle","milk":"breastmilk"\|"formula","amount_ml":90}` (`amount_ml` may be null) | none (point event) |
-| `diaper` | `{"pee":true,"poop":false}` (both false = dry) | none (point event) |
+| `diaper` | `{"pee":true,"poop":true,"color":"yellow","texture":"seedy"}` (both false = dry; `color`/`texture` optional, only with poop) | none (point event) |
 | `sleep` | `{}` | `end_at - start_at` |
 | `activity` | `{"name":"Outdoors"}` (free text, trimmed, max 60 chars) | `end_at - start_at`; none if `end_at == start_at` |
 
@@ -175,9 +181,15 @@ Conventions worth knowing:
 - Rows can be edited or deleted after the fact, so re-read rather than append-sync.
 - Activity names are free text typed by the user. The UI reuses the existing spelling when a
   typed name matches one case-insensitively, but group by `lower(name)` to be safe.
-- Entries logged from a photo carry `data.photo = {"suggested": "feeding", "confidence": 0.97}`:
-  what Claude suggested (`feeding|sleeping|playing|diaper_change|tummy_time|bath|other`). The
-  row's `kind`/`data` is what you confirmed, so comparing the two measures Claude's accuracy.
+- Optional keys on any kind: `place` (where it happened, e.g. "crib", "car seat"; max 40 chars)
+  and `ai` (below). Stool `color` is one of `yellow` (incl. mustard), `orange`, `green`,
+  `brown`, `black`, `red`, `pale`; `texture` one of `watery`, `loose`, `seedy`, `soft`,
+  `pasty`, `formed`, `hard`. Each kind keeps only its own keys; others are dropped on save.
+- Entries saved from a Claude proposal carry
+  `data.ai = {"source": "photo"|"text"|"photo+text", "model": "sonnet", "confidence": 0.9, "edited": false}`.
+  `edited` is true when you changed the proposal before saving, so `edited` rates Claude's accuracy.
+- Older entries from the first photo feature carry `data.photo = {"suggested": "feeding", "confidence": 0.97}`
+  (one of `feeding|sleeping|playing|diaper_change|tummy_time|bath|other`).
 
 ### Quick queries
 
@@ -220,8 +232,9 @@ All JSON. Writes need `Content-Type: application/json`.
 | `PATCH /api/events/{id}` | Update any of `start_at`, `end_at` (null = running again), `data`, `note` |
 | `DELETE /api/events/{id}` | Delete |
 | `GET /api/activity-names` | Distinct activity names, most recently used first |
-| `POST /api/photo/classify` | Body: raw image bytes with `Content-Type: image/*` (max 15 MB). Returns `{activity, confidence, notes, parsed, elapsed_ms, model}`. Saves nothing. |
-| `GET /api/export.csv` / `GET /api/export.json` | Everything, flattened one row per event, with `start_local`, `duration_min`, activity `name`, `photo_suggested`, `photo_confidence` |
+| `POST /api/ai/propose` | Body: `text` and/or `image` (base64 JPEG), `photo_taken_at`, `tz`, `baby_name`, `unit` (max 8 MB). Returns `{source, message, proposals, elapsed_ms, model}`; each proposal is `{op:"create", event}` (ready for `POST /api/events`) or `{op:"update", id, patch, before, after}` (ready for `PATCH`), plus `needs`, `confidence`, `why`. Saves nothing. |
+| `POST /api/ai/ask` | Body: `question`, `history` (`[{q, a}]`, last 6), `tz`, `baby_name`, `unit`. Returns `{answer (markdown), elapsed_ms, model, queries}`. Read-only. |
+| `GET /api/export.csv` / `GET /api/export.json` | Everything, flattened one row per event, with `start_local`, `end_local`, `duration_min`, activity `name`, `place`, stool `color`/`texture`, `ai_source`/`ai_model`/`ai_confidence`/`ai_edited`, `photo_suggested`, `photo_confidence` |
 
 ## Running
 
@@ -230,4 +243,4 @@ All JSON. Writes need `Content-Type: application/json`.
 sudo systemctl restart baby-tracker   # after editing code
 ```
 
-`python3 server.py` (no venv) also works; everything except photo logging is stdlib only.
+`python3 server.py` (no venv) also works; everything except the Claude features is stdlib only.

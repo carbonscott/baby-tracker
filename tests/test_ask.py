@@ -151,6 +151,12 @@ class SnapshotTest(unittest.TestCase):
         self.assertEqual(q(conn, "SELECT overlap_min(start_utc, end_utc, '2026-11-03 00:00:00', '2026-11-04 00:00:00'),"
                                  " overlap_min(NULL, NULL, 'x', 'y') FROM events LIMIT 1"), [["0", "NULL"]])
 
+    def test_running_timer_started_after_server_now(self):
+        # the phone's clock a little ahead, or a start typed up to a minute ahead (the page allows that)
+        conn = snap([row("sleep", "2026-11-02T22:30:20Z", None)])
+        self.assertEqual(q(conn, "SELECT duration_min, running FROM events"), [["0", "1"]])
+        self.assertIn("Running now: sleep since 2:30 PM (0 min).", ask_ai.glance(conn, ask_ai.zone_for(LA)))
+
     def test_empty_log(self):
         conn = snap([])
         self.assertEqual(q(conn, "SELECT count(*) FROM events"), [["0"]])

@@ -25,8 +25,27 @@ from zoneinfo import ZoneInfo
 
 import claude_ai
 
-MODEL = os.environ.get("BABY_AI_MODEL") or os.environ.get("BABY_PHOTO_MODEL") or "sonnet"
+_MODEL_ENV = os.environ.get("BABY_AI_MODEL") or os.environ.get("BABY_PHOTO_MODEL")
+MODEL = _MODEL_ENV or "sonnet"
 TIMEOUT_S = float(os.environ.get("BABY_AI_TIMEOUT", "45"))
+EFFORTS = ("low", "medium", "high", "xhigh", "max")   # Claude Code's --effort levels
+
+
+def _effort(value: str | None) -> str | None:
+    """BABY_AI_EFFORT: one of EFFORTS, or "default"/empty to let Claude Code decide.
+    Unset: "low" for the default model (in the eval, as accurate as Claude Code's default
+    effort and faster: less thinking before the answer); Claude Code's default for a model
+    chosen with BABY_AI_MODEL."""
+    v = (value or "").strip().lower()
+    if v in ("", "default", "none"):
+        return None
+    if v not in EFFORTS:
+        print(f"propose: ignoring BABY_AI_EFFORT={value!r} (use one of {', '.join(EFFORTS)})", file=sys.stderr)
+        return None
+    return v
+
+
+EFFORT = _effort(os.environ.get("BABY_AI_EFFORT", "" if _MODEL_ENV else "low"))
 
 UTC = dt.timezone.utc
 ML_PER_OZ = 29.5735
@@ -99,6 +118,8 @@ OUTPUT_SCHEMA = {
 
 SYSTEM_PROMPT = """You fill in entries for a parent's private baby log from a photo and/or a short message. The parent is tired, often holding the baby, and saves what you propose with one tap, so every detail must be right. Propose only what the photo or message supports. Never invent amounts, sides, durations, or times: leave unknown fields null.
 
+You only propose: nothing is saved until the parent taps Save, and the app shows each proposal as a card with all its details.
+
 The user turn gives you the current local time, the photo's capture time, running timers, the log entries of the last 48 hours (each with an #id), the suggested breast side, known activity names, and the parent's message. All times there are the parent's local wall-clock time, and so are the times you write: "YYYY-MM-DDTHH:MM" with the full date. Never UTC, never a time in the future.
 
 # Entry kinds
@@ -118,14 +139,21 @@ The user turn gives you the current local time, the photo's capture time, runnin
 - "needs_duration": finished, start known, but not how long it lasted (the app asks the parent).
 Breast feeds and sleep are never a "moment". Activities are a "moment" unless a duration or a running timer fits (tummy time, outdoors and walks are often timed).
 
+# One event, one entry
+Before each create, look for a log entry of the same kind (activities: same name) that it could be:
+- Already logged (diapers and bottles within about 15 minutes with matching details; sleeps, breast feeds, or timed activities whose times overlap) -> don't create it again. If the parent adds or corrects details or times, update that entry instead (e.g. log has a nap 10:00-11:30 and the parent says "napped 10:15 to 11:45": update its start and end).
+- A running timer that fits is the same event: "she woke up at 1:55" or "she slept from 1:20 to 1:55" ends the running sleep; it is not a new sleep.
+- A running timer that can't be the same event: a new sleep while an old sleep timer runs, or a timer marked "probably left on" (an entry logged after its start shows the baby was awake or done). End it with an update at its likely real end: the start of the entry named in that mark, else the new entry's start. Give that update confidence 0.5 or less and mention it in message. Then create the new entry.
+- Never leave two sleeps, or two breast feeds, overlapping in time. If you can't tell whether it's the same event, don't create; ask in message.
+
 # Photos
 The photo's capture time is the entry time. Look closely at the details.
 - Breastfeeding: no feed timer running and photo at most 20 min old -> a running breast feed starting at the photo time. Older -> "needs_duration". A feed timer already running -> no new feed. Side only when you can clearly tell; otherwise use the suggested side and say so in why.
 - Bottle: a bottle feed at the photo time. Read the amount from the bottle's markings when legible (find the milk level on the ml or oz scale) and say in why that it is the amount in the bottle at photo time. Formula vs breast milk only with evidence.
-- Asleep (eyes closed, settled): no sleep timer running and photo at most 60 min old -> a running sleep starting at the photo time; older -> "needs_duration". A sleep timer already running -> no new entry; say so in message.
+- Asleep (eyes closed, settled): no sleep timer running and photo at most 60 min old -> a running sleep starting at the photo time; older -> "needs_duration". A sleep timer already running (not marked "probably left on") -> no new entry; say so in message. One marked "probably left on" -> end it as in "One event, one entry", then start a new sleep at the photo time.
 - Awake (eyes open) while a sleep timer is running and the photo was taken after that sleep started -> update that sleep: end at the photo time. Add an entry for what the baby is doing too if it is loggable (feeding, tummy time...).
 - A feed timer running while the photo clearly shows the baby not feeding (asleep alone in the crib, playing on the mat) -> update that feed to end at the photo time, with lower confidence.
-- Diaper in view: pee from a wet, swollen look or a wetness indicator line that changed color (usually yellow -> blue); poop when stool is visible, with its color and texture. Record only what you see.
+- Diaper in view: pee from a wet, swollen look or a wetness indicator line that changed color (usually yellow -> blue); poop only when stool is clearly visible in or on the diaper, with its color and texture. If you can't see what was in it, treat it like "changed a diaper": pee true, poop false, low confidence, and say so in why.
 - Play, tummy time, bath, reading, outdoors, solids -> an activity at the photo time.
 - A handwritten log, daycare sheet, or app screenshot -> one entry per line, with its times.
 - The parent took the photo to log something. If it is ambiguous (e.g. a baby lying still in a crib, face not visible), propose the most likely entry with low confidence and say what you couldn't tell in why, rather than nothing.
@@ -137,23 +165,29 @@ They may describe several events, edits, or both. One item per event, oldest fir
 - "then she slept till 5" without a start: start at the time of the event mentioned just before it (for a bottle or diaper, its time; for a breast feed, its end). If nothing gives the start: a running sleep timer -> end it (update); otherwise propose nothing for it and ask in message.
 - Edits change an existing entry: op "update", its #id, its kind, and only the fields that change; every other field null (null = keep). Examples: "the last feed was the right side" (side of the latest feed); "she woke up at 4:10" (end the running sleep at 4:10, or fix the end of the latest sleep); "stop the feed" (end the running feed now); "the 3 am bottle was 5 oz" (amount). A note on an update replaces the whole note.
 - "she just fell asleep" / "starting a feed on the left" -> running from now; "fell asleep 10 min ago" -> running from 10 min ago.
-- A new timer while one of the same kind is still running (e.g. a new feed while an old feed timer runs): also end the old one with an update (at its real end if known, else at the new start).
-- Don't duplicate an entry that is already in the log (same kind, about the same time). If the parent adds details to it, update it.
 - "changed a diaper" with no details: pee true, poop false, and say in why that you assumed wet. "Poopy"/"dirty": poop true (pee only if said). "Wet": pee only.
 - You can't delete entries: say so in message (the parent can delete from the timeline).
 - A question instead of something to log ("when did she last eat?") -> no items; message: "That's a question: tap Ask."
 - Medicine or vitamins the parent mentions: an activity named for it, their words in the note. Never comment on doses.
 
 # Notes
-note: for a photo, 1-2 short, specific sentences a parent will love to remember later: what the baby is doing, expression and mood, toys, clothes, the setting. E.g. "Wide awake on the play mat, kicking at the hanging giraffe and smiling." For a message, only extra details the parent said that have no field ("spit up a little", "fussy before"); else "". Don't repeat the fields (time, side, amount, place). Use the baby's name if given, else "baby"; use he/she/they only as the parent's message does (with no message, avoid pronouns). Don't describe or name adults or anyone else, and never guess who someone is.
+note: for a photo, 1-2 short, specific sentences a parent will love to remember later: what the baby is doing, expression and mood, toys, clothes, the setting. E.g. "Wide awake on the play mat, kicking at the hanging giraffe and smiling." For a message, only extra details the parent said that have no field ("spit up a little", "fussy before"); else "". Don't repeat the fields (time, side, amount, place). Don't describe or name adults or anyone else, and never guess who someone is.
 
 # Every item
 - confidence: honest, 0-1. Lower it for anything you assumed.
 - why: one short evidence line: "formula tin in view; bottle reads ~120 ml at photo time", "you said 4 oz at 3".
-- message: at most 2 short, plain sentences for the parent: what you saw or understood, what you assumed, or why there is nothing to log. Don't list every field; the app shows them.
-- In message and why, write clock times the way the parent does; if unsure, 12-hour ("2:05 pm").
-Write note, why, and message in the language of the parent's message (English for a photo alone).
-No health judgments, no sleep-safety advice, nothing about medicine doses, no identifying people."""
+
+# message (shown above the cards)
+- With proposals: one short sentence, under 15 words, about what you saw or understood, worded as a suggestion, never as done. Good: "Mia asleep in the stroller.", "Here's the bottle and the poopy diaper.", "I'd end the nap at 1:55.". Never write that you logged, added, saved, updated, changed, ended, stopped, or started anything: nothing is saved yet. Don't repeat what the cards show (times, amounts, sides, colors).
+- Add a second short sentence only to flag something the parent should check: an assumed time or side, or an old timer you propose to end ("I guessed the diaper's time.").
+- With no proposals: one or two short sentences on why (already in the log, a question, what you see).
+
+# Style for message, why, and note
+- Refer to log entries by kind and time ("the 12:15 pm feed"), never by #id.
+- The baby: the baby's name if given, else "baby" or "the baby". Write he/him/his or she/her only if the parent's message calls the baby that; never guess the baby's sex from a photo, clothes, or a name. With no message, use no pronouns for the baby.
+- Clock times the way the parent writes them; if unsure, 12-hour ("2:05 pm").
+- The language of the parent's message (English for a photo alone).
+- No health judgments, no sleep-safety advice, nothing about medicine doses, no identifying people."""
 
 
 # ---------- context ----------
@@ -223,10 +257,35 @@ def describe(ev: dict, unit: str) -> str:
     return what
 
 
-def event_line(ev: dict, ctx: Ctx) -> str:
+def _what(ev: dict) -> str:
+    if ev["kind"] == "feed":
+        return "a bottle feed" if ev["data"].get("method") == "bottle" else "a breast feed"
+    if ev["kind"] == "activity":
+        return f'"{ev["data"].get("name")}"'
+    return f"a {ev['kind']}"
+
+
+def left_on_by(ev: dict, rows: list[dict]) -> dict | None:
+    """For a running sleep or feed timer: the first entry logged to start after it that shows the
+    baby was awake or done (a feed or activity during a "sleep"; a sleep, activity, or other feed
+    during a "feed"), i.e. the timer was probably left on. Diapers don't count (night changes,
+    changes between sides). None if nothing contradicts it."""
+    if ev["end_at"] is not None or ev["kind"] not in ("sleep", "feed"):
+        return None
+    awake = ("feed", "activity") if ev["kind"] == "sleep" else ("sleep", "activity", "feed")
+    later = [e for e in rows if e["id"] != ev["id"] and e["start_at"] > ev["start_at"] and e["kind"] in awake]
+    return min(later, key=lambda e: (e["start_at"], e["id"]), default=None)
+
+
+def event_line(ev: dict, ctx: Ctx, rows: list[dict] | None = None) -> str:
     start = parse_utc(ev["start_at"])
     if ev["end_at"] is None:
-        when = f"{wall(start, ctx.zone)}, RUNNING ({fmt_dur(ctx.now - start)} so far)"
+        when = f"{wall(start, ctx.zone)}, RUNNING ({fmt_dur(ctx.now - start)} so far"
+        if by := left_on_by(ev, rows or []):
+            t = parse_utc(by["start_at"])
+            same_day = t.astimezone(ctx.zone).date() == start.astimezone(ctx.zone).date()
+            when += f"; probably left on: {_what(by)} at {wall(t, ctx.zone, date=not same_day)} was logged after it started"
+        when += ")"
     elif ev["end_at"] == ev["start_at"]:
         when = wall(start, ctx.zone)
     else:
@@ -284,9 +343,9 @@ def build_context(ctx: Ctx, text: str | None) -> str:
 
     rows = context_events(ctx)
     running = [e for e in rows if e["end_at"] is None]
-    lines += ["", "Running timers:"] + ([event_line(e, ctx) for e in running] or ["none"])
+    lines += ["", "Running timers:"] + ([event_line(e, ctx, rows) for e in running] or ["none"])
     lines += ["", f"Log entries of the last {CONTEXT_HOURS} h, newest first (#id | local time | what | note):"]
-    lines += [event_line(e, ctx) for e in rows] or ["none"]
+    lines += [event_line(e, ctx, rows) for e in rows] or ["none"]
     lines.append("")
     if text:
         about = " about the photo" if ctx.photo_at is not None else ""
@@ -323,6 +382,28 @@ def _number(value) -> float | None:
 
 def _text(value, limit: int) -> str:
     return " ".join(value.split())[:limit].strip() if isinstance(value, str) else ""
+
+
+ID_PAREN = r"\s*\(#({ids})\)"              # " (#12)"
+ID_REF = r"#({ids})\b(?:,\s*|\s+)?"          # "#12 ", "#12, "
+SPACE_PUNCT = re.compile(r"\s+([.,;:!?)])")
+
+
+def scrub_ids(text: str, ids) -> str:
+    """Parent-facing text (message, why, note) must not show internal row ids ("sleep #12"):
+    the parent never sees them. Claude is told so; this removes any that slip through.
+    Only ids of rows Claude was shown, so "bottle #2 of the day" stays."""
+    alt = "|".join(str(i) for i in sorted(ids, reverse=True))
+    if "#" not in text or not alt:
+        return text
+    text = re.sub(ID_REF.format(ids=alt), "", re.sub(ID_PAREN.format(ids=alt), "", text))
+    text = SPACE_PUNCT.sub(r"\1", text).replace("()", "")
+    return " ".join(text.split())
+
+
+def _say(value, limit: int, ctx: "Ctx") -> str:
+    """Parent-facing text from Claude: one line, trimmed, without row ids."""
+    return scrub_ids(_text(value, limit), [e["id"] for e in context_events(ctx)])
 
 
 def _confidence(value) -> float | None:
@@ -495,7 +576,7 @@ def _create(item: dict, ctx: Ctx) -> dict:
         elif end is None:
             needs = ["duration"]
     event = {"kind": kind, "start_at": iso(start), "end_at": iso(end) if end else None,
-             "data": data, "note": _text(item.get("note"), 500)}
+             "data": data, "note": _say(item.get("note"), 500, ctx)}
     return {"op": "create", "event": event, "needs": needs}
 
 
@@ -530,7 +611,7 @@ def _update(item: dict, ctx: Ctx) -> dict:
     data = _data(ev["kind"], item, ctx, ev["data"])
     if data != ev["data"]:
         patch["data"] = data
-    note = _text(item.get("note"), 500)
+    note = _say(item.get("note"), 500, ctx)
     if note and note != ev["note"]:
         patch["note"] = note
     if not patch:
@@ -552,29 +633,80 @@ def to_change(item, ctx: Ctx) -> dict | None:
         log(f"dropped item ({e}): {json.dumps(item)[:400]}")
         return None
     change["confidence"] = _confidence(item.get("confidence"))
-    change["why"] = _text(item.get("why"), 200)
+    change["why"] = _say(item.get("why"), 200, ctx)
     return change
 
 
-def drop_duplicate_timers(changes: list[dict], ctx: Ctx) -> list[dict]:
-    """Drop a new running timer when the same timer is already running and nothing in this
-    batch ends it (saving it would split the running nap or feed in two)."""
-    ended = {c["id"] for c in changes if c["op"] == "update" and c["patch"].get("end_at")}
-    running = [e for e in context_events(ctx) if e["end_at"] is None and e["id"] not in ended]
+FOREVER = dt.datetime.max.replace(tzinfo=UTC)
+DUPLICATE_GAP = dt.timedelta(minutes=5)   # the same diaper/bottle/activity logged twice
 
-    def same(ev: dict, other: dict) -> bool:
-        if ev["kind"] != other["kind"]:
-            return False
-        if ev["kind"] == "activity":
-            return ev["data"].get("name", "").lower() == other["data"].get("name", "").lower()
-        return True
 
+def _span(ev: dict, needs: bool = False) -> tuple[dt.datetime, dt.datetime]:
+    """(start, end) of an entry: a running timer has no end yet; an end still to be asked for
+    (needs duration) is treated as just its start."""
+    start = parse_utc(ev["start_at"])
+    if ev["end_at"] is None:
+        return start, start if needs else FOREVER
+    return start, parse_utc(ev["end_at"])
+
+
+def _track(ev: dict) -> tuple | None:
+    """Entries one baby can't have twice at the same time: sleeps, breast feeds, or activities of one name."""
+    d = ev["data"]
+    if ev["kind"] == "sleep":
+        return ("sleep",)
+    if ev["kind"] == "feed" and d.get("method") == "breast":
+        return ("breast",)
+    if ev["kind"] == "activity":
+        return ("activity", str(d.get("name") or "").lower())
+    return None
+
+
+def _core(ev: dict) -> tuple:
+    keys = {"diaper": ("pee", "poop"), "feed": ("method", "milk", "amount_ml"), "activity": ("name",)}
+    return (ev["kind"], *(str(ev["data"].get(k)).lower() for k in keys.get(ev["kind"], ())))
+
+
+def _clash(new: dict, needs: bool, old: dict) -> str | None:
+    """Why `new` (a proposed create) would log `old` again, or None."""
+    a0, a1 = _span(new, needs)
+    b0, b1 = _span(old)
+    if a0 == a1 and b0 == b1:   # two moments: the same diaper, bottle, or activity twice?
+        return "duplicates" if _core(new) == _core(old) and abs(a0 - b0) <= DUPLICATE_GAP else None
+    if _track(new) is None or _track(new) != _track(old):
+        return None
+    if a0 == a1:
+        hit = b0 <= a0 < b1
+    elif b0 == b1:
+        hit = a0 <= b0 < a1
+    else:
+        hit = max(a0, b0) < min(a1, b1)
+    return "overlaps" if hit else None
+
+
+def drop_double_logs(changes: list[dict], ctx: Ctx) -> list[dict]:
+    """Safety net: drop a create that would log an event twice: the same diaper/bottle/activity
+    within a few minutes, or a sleep, breast feed, or same-name activity overlapping one in the
+    log or earlier in this batch (judged after this batch's updates, so "end the old nap, start a
+    new one" is fine). That includes a new running timer while the same timer still runs:
+    saving it would split the running nap or feed in two."""
+    rows = {e["id"]: e for e in context_events(ctx)}
+    for c in changes:
+        if c["op"] == "update" and c["id"] in rows:
+            rows[c["id"]] = {**rows[c["id"]], **{k: v for k, v in c["patch"].items()
+                                                 if k in ("start_at", "end_at", "data")}}
+    taken = list(rows.values())   # log rows, then the creates kept so far
     keep = []
     for c in changes:
-        if c["op"] == "create" and c["event"]["end_at"] is None and not c["needs"] and \
-                any(same(c["event"], r) for r in running):
-            log(f"dropped a duplicate running {c['event']['kind']} timer")
-            continue
+        if c["op"] == "create":
+            ev = c["event"]
+            hit = next(((why, old) for old in taken if (why := _clash(ev, bool(c["needs"]), old))), None)
+            if hit:
+                why, old = hit
+                log(f"dropped a {ev['kind']} at {ev['start_at']} that {why} "
+                    f"{'#' + str(old['id']) if 'id' in old else 'another proposal'}")
+                continue
+            taken.append(ev)
         keep.append(c)
     return keep
 
@@ -602,7 +734,7 @@ def propose(*, text: str | None, jpeg: bytes | None, photo_taken_at: dt.datetime
     content = [claude_ai.image_block(jpeg)] if jpeg is not None else []
     content.append(claude_ai.text_block(build_context(ctx, text)))
     r = claude_ai.run_claude(content, system_prompt=SYSTEM_PROMPT, model=MODEL, timeout_s=TIMEOUT_S,
-                             output_schema=OUTPUT_SCHEMA)
+                             output_schema=OUTPUT_SCHEMA, effort=EFFORT)
     out = r.structured if isinstance(r.structured, dict) else {}
     items = out.get("items") if isinstance(out.get("items"), list) else []
     changes = []
@@ -612,10 +744,10 @@ def propose(*, text: str | None, jpeg: bytes | None, photo_taken_at: dt.datetime
                 changes.append(change)
         except Exception:   # a model answer must never crash the request
             traceback.print_exc()
-    changes = drop_duplicate_timers(changes, ctx)
+    changes = drop_double_logs(changes, ctx)
     dropped = len(items[:MAX_ITEMS]) - len(changes)
     source = "photo+text" if jpeg is not None and text else "photo" if jpeg is not None else "text"
     cost = f" ${r.cost_usd:.4f}" if r.cost_usd is not None else ""
     log(f"{source} {r.model} {r.elapsed_ms} ms{cost}: {len(items)} items, {len(changes)} kept")
-    return {"source": source, "message": _text(out.get("message"), 600), "changes": changes,
+    return {"source": source, "message": _say(out.get("message"), 600, ctx), "changes": changes,
             "dropped": dropped, "elapsed_ms": r.elapsed_ms, "model": r.model}

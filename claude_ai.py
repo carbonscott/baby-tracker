@@ -201,6 +201,8 @@ async def _run(content, *, system_prompt, model, max_turns, output_schema, mcp_s
 def _explain(detail: str, kind: str | None = None, status: int | None = None) -> str:
     """Map a failure to a message that says what to do. Structured signals first, then text."""
     d = detail.lower()
+    if "maximum number of turns" in d:   # Claude Code exits with an error at the turn limit
+        return "Claude needed too many steps for this one. Try a simpler question."
     if kind == "rate_limit" or status == 429 or re.search(r"usage limit|rate limit|hit your limit|\b429\b", d):
         return "Claude usage limit reached. Try again later."
     if kind == "authentication_failed" or status in (401, 403) or re.search(
