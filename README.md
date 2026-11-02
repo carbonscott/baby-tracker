@@ -5,6 +5,18 @@ vitamin D, ...), and logging from a photo with Claude. One Python server, one HT
 SQLite file. Built to be fast to use one-handed at 3 a.m. and easy for another program to
 analyze later.
 
+<p align="center">
+  <img src="docs/screenshots/home.png" width="250" alt="Home screen: running feed timer, quick tiles, last-24h summary, timeline">
+  &nbsp;
+  <img src="docs/screenshots/photo.png" width="250" alt="Log from a photo: Claude suggests Feeding, 97% sure">
+  &nbsp;
+  <img src="docs/screenshots/feed.png" width="250" alt="Feed sheet: side, timer or already done, quick time chips">
+</p>
+<p align="center"><sub>Demo data. Photo in the middle screenshot: "Baby and baby milk bottle, Baby feeding, Moscow, Russia"
+by Vyacheslav Argenberg, <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>, via
+<a href="https://commons.wikimedia.org/wiki/File:Baby_and_baby_milk_bottle,_Baby_feeding,_Moscow,_Russia.jpg">Wikimedia Commons</a>
+(resized, shown inside an app screenshot).</sub></p>
+
 - **App URL:** `https://<your-vm>.exe.xyz:8420/` on an [exe.dev](https://exe.dev) VM (private: needs an exe.dev login with access to the VM). Keep it private; don't run `share set-public`.
 - **Data:** `data/baby.db` (SQLite). Daily snapshots in `data/backups/` (last 90 kept).
 - **Service:** `sudo systemctl status baby-tracker` · logs: `journalctl -u baby-tracker -f`
