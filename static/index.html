@@ -122,6 +122,8 @@
   .visually-hidden { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; pointer-events: none; }
   textarea.txt { display: block; width: 100%; padding: 12px; background: var(--bg); border: 1px solid var(--line); border-radius: 10px;
     font: inherit; font-size: 16px; color: inherit; resize: vertical; }
+  /* note boxes grow with their text (fitText), then scroll once they reach about 10 lines */
+  textarea.txt.grow { resize: none; overflow-y: auto; max-height: min(45vh, 252px); }
   .btn:disabled { opacity: .45; }
   .btn.small { padding: 8px 12px; font-size: 14px; }
   .photo { display: block; width: 100%; max-height: 260px; margin-top: 10px; object-fit: contain; background: #000; border-radius: 14px; }
@@ -645,6 +647,7 @@ function openSheet(title, cls, body) {
       h('div', { class: 'panel-head' }, h('h2', {}, title), h('button', { class: 'icon-btn', onclick: closeSheet, 'aria-label': 'Close' }, '✕')),
       body));
   $('#sheet').classList.remove('hidden');
+  fitTexts($('#sheet'));
 }
 function closeSheet() {
   $('#sheet').classList.add('hidden');
@@ -827,7 +830,23 @@ function timerOrPast(pane, act, o) {
   return { setMode: (v) => mode.set(v) };
 }
 
-const noteInput = () => h('input', { class: 'txt', placeholder: 'Optional' });
+// Note box: one line when empty, grows as the note gets longer, scrolls past about 10 lines (CSS max-height).
+function noteInput(value = '') {
+  const ta = h('textarea', { class: 'txt grow', rows: 1, maxlength: 2000, placeholder: 'Optional', 'aria-label': 'Note' });
+  ta.value = value;
+  ta.addEventListener('input', () => fitText(ta));
+  return ta;
+}
+// Height = the text's height. Needs the box on screen, so openSheet, the card Edit button and resizes call it too.
+function fitText(ta) {
+  if (!ta.clientWidth) return;   // hidden: fitted again when shown
+  const panel = ta.closest('.panel'), top = panel && panel.scrollTop;
+  ta.style.height = 'auto';   // shrink first, so deleting text makes it smaller again
+  ta.style.height = `${ta.scrollHeight + ta.offsetHeight - ta.clientHeight}px`;   // + borders
+  if (panel) panel.scrollTop = top;   // the sheet doesn't jump while you type
+}
+const fitTexts = (root) => root.querySelectorAll('textarea.grow').forEach(fitText);
+addEventListener('resize', () => fitTexts(document));
 
 function openFeedSheet(pre = {}) {
   const sug = suggestedSide();
@@ -947,7 +966,7 @@ function openActivitySheet(pre = {}) {
       (r) => `Logged ${r.data.name}${atText(r.start_at)}`, (r) => del(r.id)),
   });
   if (pre.name) { nameIn.value = pre.name; mark(); pickMode(pre.name); }
-  if (pre.note) note.value = pre.note;
+  if (pre.note) note.value = pre.note;   // set before openSheet, which sizes the box
   openSheet('Activity', 'activity', h('div', {},
     field('What', h('div', { class: 'chips' }, chips), nameIn), pane, field('Note', note), act));
 }
@@ -1151,8 +1170,7 @@ function checkEnd(start, end) {
 function openEdit(e) {
   const start = dtBox(e.start_at);
   const origStart = start.input.value;
-  const note = noteInput();
-  note.value = e.note || '';
+  const note = noteInput(e.note || '');
   const endField = endEditor(e);
   const timed = (method) => e.kind === 'sleep' || (e.kind === 'feed' && method === 'breast') || (e.kind === 'activity' && !isPoint(e));
   const det = detailsEditor(e.kind, e.data, (m) => endField.classList.toggle('hidden', !timed(m)));
@@ -1388,6 +1406,7 @@ function renderCard(rv, c, multi) {
     }
     const open = !edWrap.classList.toggle('hidden');
     editBtn.textContent = open ? 'Done' : 'Edit';
+    if (open) fitTexts(edWrap);
   }
   // Anything the parent changes (Edit, or a choice other than Claude's) counts as edited (data.ai.edited).
   c.touch = () => {
@@ -1458,8 +1477,7 @@ function cardEditor(c, onChange) {
   const det = detailsEditor(o.kind, o.data, () => layout());
   const start = dtBox(o.start_at);
   const startIn = start.input.value;
-  const note = h('textarea', { class: 'txt', rows: 2, maxlength: 2000, placeholder: 'Optional' });
-  note.value = o.note;
+  const note = noteInput(o.note);
   const startField = field('Started', start.input, start.preview);
   const endField = endEditor(o);
   const point = () => { const d = det.get(); return o.kind === 'diaper' || (o.kind === 'feed' && d.method === 'bottle') || moment; };
