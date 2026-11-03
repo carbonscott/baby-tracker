@@ -5,6 +5,9 @@ log (running timers, the last 48 h of entries with ids), and answers with flat i
 local wall-clock time. This module turns those into changes the server can validate:
   {"op": "create", "event": {kind, start_at, end_at, data, note}, "needs": [], "confidence", "why"}
   {"op": "update", "id": 12, "patch": {start_at?, end_at?, data?, note?}, "confidence", "why"}
+A create whose end isn't known (a sleep, breast feed, or timed activity) also has
+  "open_end": {"default": "running" | "ended" | "unknown", "ended_at", "reason"}
+(see open_end()); its event's end_at follows that default, so it can be saved as it is.
 Nothing is saved here: the server dry-runs each change with its own validation, and the
 parent confirms in the page.
 
@@ -54,6 +57,9 @@ SLACK = dt.timedelta(minutes=1)          # "now" tolerance, as in the page's res
 CONTEXT_HOURS = 48
 MAX_CONTEXT_ROWS = 80
 MAX_ITEMS = 12
+# How long ago an entry with no known end may have started and still plausibly be going on now (open_end())
+STILL_GOING = {"sleep": dt.timedelta(hours=4), "feed": dt.timedelta(hours=1), "activity": dt.timedelta(hours=2)}
+MIN_ENDED = dt.timedelta(minutes=5)   # an "ended" default shorter than this is no guess (e.g. a photo 1 min before the next entry)
 
 KINDS = ("feed", "diaper", "sleep", "activity")
 SIDES = ("left", "right", "both")
@@ -136,8 +142,9 @@ The user turn gives you the current local time, the photo's capture time, runnin
 - "moment": one point in time: diapers, bottles, an activity noted once. Put the time in start; end null.
 - "range": finished, with start and end known (give end, or duration_min).
 - "running": started at start and still going now (the app runs a timer).
-- "needs_duration": finished, start known, but not how long it lasted (the app asks the parent).
+- "needs_duration": finished, start known, but not how long it lasted.
 Breast feeds and sleep are never a "moment". Activities are a "moment" unless a duration or a running timer fits (tummy time, outdoors and walks are often timed).
+When the end isn't known, the card lets the parent choose Still going, Ended (with its end), or Don't know (saved without a duration), so never skip an entry because you don't know how long it lasted. No end or duration said ("she fell asleep at 2", "nursing on the left since 1:30") -> "running": a parent who doesn't say how long usually means it's still going. "needs_duration" only when the parent's words say it's over ("she napped around noon", "nursed her at 11") or an entry logged after it shows it ended. In message and why, don't say whether such an entry is still going, ended, or has no duration: the card preselects that choice and shows its own reason.
 
 # One event, one entry
 Before each create, look for a log entry of the same kind (activities: same name) that it could be:
@@ -148,9 +155,9 @@ Before each create, look for a log entry of the same kind (activities: same name
 
 # Photos
 The photo's capture time is the entry time. Look closely at the details.
-- Breastfeeding: no feed timer running and photo at most 20 min old -> a running breast feed starting at the photo time. Older -> "needs_duration". A feed timer already running -> no new feed. Side only when you can clearly tell; otherwise use the suggested side and say so in why.
+- Breastfeeding: no feed timer running -> a breast feed starting at the photo time: "running" if it could plausibly still be going now and nothing logged after the photo contradicts that, else "needs_duration". A feed timer already running -> no new feed. Side only when you can clearly tell; otherwise use the suggested side and say so in why.
 - Bottle: a bottle feed at the photo time. Read the amount from the bottle's markings when legible (find the milk level on the ml or oz scale) and say in why that it is the amount in the bottle at photo time. Formula vs breast milk only with evidence.
-- Asleep (eyes closed, settled): no sleep timer running and photo at most 60 min old -> a running sleep starting at the photo time; older -> "needs_duration". A sleep timer already running (not marked "probably left on") -> no new entry; say so in message. One marked "probably left on" -> end it as in "One event, one entry", then start a new sleep at the photo time.
+- Asleep (eyes closed, settled): no sleep timer running -> a sleep starting at the photo time: "running" if the baby could plausibly still be asleep now and nothing logged after the photo contradicts that, else "needs_duration". A sleep timer already running (not marked "probably left on") -> no new entry; say so in message. One marked "probably left on" -> end it as in "One event, one entry", then start a new sleep at the photo time.
 - Awake (eyes open) while a sleep timer is running and the photo was taken after that sleep started -> update that sleep: end at the photo time. Add an entry for what the baby is doing too if it is loggable (feeding, tummy time...).
 - A feed timer running while the photo clearly shows the baby not feeding (asleep alone in the crib, playing on the mat) -> update that feed to end at the photo time, with lower confidence.
 - Diaper in view: pee from a wet, swollen look or a wetness indicator line that changed color (usually yellow -> blue); poop only when stool is clearly visible in or on the diaper, with its color and texture. If you can't see what was in it, treat it like "changed a diaper": pee true, poop false, low confidence, and say so in why.
@@ -265,16 +272,23 @@ def _what(ev: dict) -> str:
     return f"a {ev['kind']}"
 
 
+ENDED_BY = {"sleep": ("feed", "activity"), "feed": ("sleep", "activity", "feed"), "activity": ("sleep", "activity")}
+
+
+def ended_by(ev: dict, rows: list[dict]) -> dict | None:
+    """The first of `rows` to start after `ev` that shows `ev` was over by then (the baby was awake
+    or done): a feed or activity after a sleep; a sleep, activity, or other feed after a feed; a
+    sleep or other activity after an activity. Diapers don't count (night changes, changes
+    between sides). None if nothing does."""
+    later = [e for e in rows if e["start_at"] > ev["start_at"] and e["kind"] in ENDED_BY.get(ev["kind"], ())]
+    return min(later, key=lambda e: (e["start_at"], e["id"]), default=None)
+
+
 def left_on_by(ev: dict, rows: list[dict]) -> dict | None:
-    """For a running sleep or feed timer: the first entry logged to start after it that shows the
-    baby was awake or done (a feed or activity during a "sleep"; a sleep, activity, or other feed
-    during a "feed"), i.e. the timer was probably left on. Diapers don't count (night changes,
-    changes between sides). None if nothing contradicts it."""
+    """For a running sleep or feed timer: the entry that shows the timer was probably left on (ended_by)."""
     if ev["end_at"] is not None or ev["kind"] not in ("sleep", "feed"):
         return None
-    awake = ("feed", "activity") if ev["kind"] == "sleep" else ("sleep", "activity", "feed")
-    later = [e for e in rows if e["id"] != ev["id"] and e["start_at"] > ev["start_at"] and e["kind"] in awake]
-    return min(later, key=lambda e: (e["start_at"], e["id"]), default=None)
+    return ended_by(ev, rows)
 
 
 def event_line(ev: dict, ctx: Ctx, rows: list[dict] | None = None) -> str:
@@ -288,6 +302,8 @@ def event_line(ev: dict, ctx: Ctx, rows: list[dict] | None = None) -> str:
         when += ")"
     elif ev["end_at"] == ev["start_at"]:
         when = wall(start, ctx.zone)
+        if ev["kind"] == "sleep" or ev["data"].get("method") == "breast":
+            when += " (no duration logged)"
     else:
         end = parse_utc(ev["end_at"])
         same_day = start.astimezone(ctx.zone).date() == end.astimezone(ctx.zone).date()
@@ -562,7 +578,6 @@ def _create(item: dict, ctx: Ctx) -> dict:
     data = _data(kind, item, ctx, {})
     start = _start(item, ctx)
     timing = item.get("timing")
-    needs = []
     if kind == "diaper" or (kind == "feed" and data["method"] == "bottle"):
         end = start                                   # point events
     elif timing == "running":
@@ -573,11 +588,49 @@ def _create(item: dict, ctx: Ctx) -> dict:
         end = _end(item, start, ctx)
         if end is None and kind == "activity" and timing is None:
             end = start
-        elif end is None:
-            needs = ["duration"]
     event = {"kind": kind, "start_at": iso(start), "end_at": iso(end) if end else None,
              "data": data, "note": _say(item.get("note"), 500, ctx)}
-    return {"op": "create", "event": event, "needs": needs}
+    change = {"op": "create", "event": event, "needs": []}
+    if end is None:   # running, or the end isn't known: the parent picks Still going / Ended / Don't know
+        change["open_end"] = oe = open_end(event, timing, ctx)
+        event["end_at"] = {"running": None, "ended": oe["ended_at"], "unknown": event["start_at"]}[oe["default"]]
+    return change
+
+
+def clock(t: dt.datetime, ctx: Ctx) -> str:
+    """Parent-facing local time: "1:15 PM", "yesterday 11:40 PM", "Sat 9:05 AM"."""
+    local = t.astimezone(ctx.zone)
+    days = (ctx.now.astimezone(ctx.zone).date() - local.date()).days
+    day = "" if days == 0 else "yesterday " if days == 1 else f"{local:%a} "
+    return day + local.strftime("%I:%M %p").lstrip("0")
+
+
+def open_end(ev: dict, timing, ctx: Ctx) -> dict:
+    """The preselected choice for a proposed sleep, breast feed, or timed activity with no known end:
+    1. "ended" at the start of the first log entry after it that shows it was over (ended_by), if that
+       makes a plausible length (MIN_ENDED up to STILL_GOING for its kind). A longer gap -> "unknown", with that
+       entry's start kept in ended_at as a hint the page prefills if the parent picks "Ended…";
+    2. else "running" if Claude said "running", or if Claude didn't say it's finished
+       ("needs_duration") and it started recently enough to still be going (STILL_GOING);
+    3. else "unknown": saved without a duration (end == start).
+    Returns {"default", "ended_at" (UTC or None), "reason" (parent-facing)}."""
+    start = parse_utc(ev["start_at"])
+    if by := ended_by(ev, context_events(ctx)):
+        at = parse_utc(by["start_at"])
+        if MIN_ENDED <= at - start <= STILL_GOING[ev["kind"]]:
+            return {"default": "ended", "ended_at": by["start_at"],
+                    "reason": f"{_what(by)} was logged at {clock(at, ctx)}"}
+        # e.g. a breast feed at 10 AM and the next bottle at 1:15 PM: over by then, but a 3 h feed is no
+        # guess; nor is a 1-minute nap from a sleeping photo taken just before the next entry
+        return {"default": "unknown", "ended_at": by["start_at"],
+                "reason": f"over by {clock(at, ctx)} ({_what(by)}), "
+                          + ("too long to guess the end" if at - start > MIN_ENDED else "too soon to tell how long")}
+    if timing == "running" or (timing != "needs_duration" and ctx.now - start <= STILL_GOING[ev["kind"]]):
+        return {"default": "running", "ended_at": None,
+                "reason": f"started {ago(start, ctx.now)}, no end logged"}
+    return {"default": "unknown", "ended_at": None,
+            "reason": "probably over, no end time given" if timing == "needs_duration"
+            else f"started {ago(start, ctx.now)}, no end time given"}
 
 
 def _update(item: dict, ctx: Ctx) -> dict:
@@ -641,13 +694,11 @@ FOREVER = dt.datetime.max.replace(tzinfo=UTC)
 DUPLICATE_GAP = dt.timedelta(minutes=5)   # the same diaper/bottle/activity logged twice
 
 
-def _span(ev: dict, needs: bool = False) -> tuple[dt.datetime, dt.datetime]:
-    """(start, end) of an entry: a running timer has no end yet; an end still to be asked for
-    (needs duration) is treated as just its start."""
+def _span(ev: dict) -> tuple[dt.datetime, dt.datetime]:
+    """(start, end) of an entry: a running timer has no end yet. A create with an open end
+    follows its default (its end_at): running, ended at ended_at, or unknown (just its start)."""
     start = parse_utc(ev["start_at"])
-    if ev["end_at"] is None:
-        return start, start if needs else FOREVER
-    return start, parse_utc(ev["end_at"])
+    return start, FOREVER if ev["end_at"] is None else parse_utc(ev["end_at"])
 
 
 def _track(ev: dict) -> tuple | None:
@@ -667,9 +718,9 @@ def _core(ev: dict) -> tuple:
     return (ev["kind"], *(str(ev["data"].get(k)).lower() for k in keys.get(ev["kind"], ())))
 
 
-def _clash(new: dict, needs: bool, old: dict) -> str | None:
+def _clash(new: dict, old: dict) -> str | None:
     """Why `new` (a proposed create) would log `old` again, or None."""
-    a0, a1 = _span(new, needs)
+    a0, a1 = _span(new)
     b0, b1 = _span(old)
     if a0 == a1 and b0 == b1:   # two moments: the same diaper, bottle, or activity twice?
         return "duplicates" if _core(new) == _core(old) and abs(a0 - b0) <= DUPLICATE_GAP else None
@@ -700,7 +751,7 @@ def drop_double_logs(changes: list[dict], ctx: Ctx) -> list[dict]:
     for c in changes:
         if c["op"] == "create":
             ev = c["event"]
-            hit = next(((why, old) for old in taken if (why := _clash(ev, bool(c["needs"]), old))), None)
+            hit = next(((why, old) for old in taken if (why := _clash(ev, old))), None)
             if hit:
                 why, old = hit
                 log(f"dropped a {ev['kind']} at {ev['start_at']} that {why} "

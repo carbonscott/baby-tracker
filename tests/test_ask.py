@@ -151,6 +151,25 @@ class SnapshotTest(unittest.TestCase):
         self.assertEqual(q(conn, "SELECT overlap_min(start_utc, end_utc, '2026-11-03 00:00:00', '2026-11-04 00:00:00'),"
                                  " overlap_min(NULL, NULL, 'x', 'y') FROM events LIMIT 1"), [["0", "NULL"]])
 
+    def test_sleep_and_breast_feed_without_a_duration(self):
+        # end == start ("Don't know"): duration NULL, no minutes added, still counted
+        conn = snap([
+            row("sleep", "2026-11-02T18:00:00Z"),                                                      # 10 AM
+            row("sleep", "2026-11-02T19:00:00Z", "2026-11-02T20:00:00Z"),
+            row("feed", "2026-11-02T17:00:00Z", method="breast", side="left"),                         # 9 AM
+            row("feed", "2026-11-02T21:00:00Z", method="breast", side="left"),                         # 1 PM
+            row("feed", "2026-11-02T21:05:00Z", "2026-11-02T21:15:00Z", method="breast", side="right"),
+        ])
+        self.assertEqual(q(conn, "SELECT kind, duration_min, running, end_local FROM events ORDER BY id"),
+                         [["sleep", "NULL", "0", "2026-11-02 10:00"], ["sleep", "60", "0", "2026-11-02 12:00"],
+                          ["feed", "NULL", "0", "2026-11-02 09:00"], ["feed", "NULL", "0", "2026-11-02 13:00"],
+                          ["feed", "10", "0", "2026-11-02 13:15"]])
+        self.assertEqual(q(conn, "SELECT count(*) FROM day_segments"), [["2"]])
+        self.assertEqual(q(conn, "SELECT feeds, breast_min, sleep_min, longest_sleep_min FROM days"),
+                         [["2", "10", "60", "60"]])
+        self.assertEqual(q(conn, "SELECT feeds, breast_min, sides FROM feed_sessions ORDER BY session"),
+                         [["1", "NULL", "left"], ["2", "10", "left,right"]])
+
     def test_running_timer_started_after_server_now(self):
         # the phone's clock a little ahead, or a start typed up to a minute ahead (the page allows that)
         conn = snap([row("sleep", "2026-11-02T22:30:20Z", None)])
@@ -265,6 +284,7 @@ class PromptAndAskTest(unittest.TestCase):
         self.assertIn("Running now: sleep since 2:13 PM (17 min).", p)
         self.assertIn("Activities: Tummy time (2).", p)
         self.assertIn("CREATE TABLE day_segments", p)
+        self.assertIn("end == start on a sleep or breast feed = duration not logged", p)
         p = ask_ai.system_prompt(conn, ask_ai.zone_for(LA), NOW, "", "weird")
         self.assertIn('say "the baby"', p)
         self.assertIn("show amounts in ml", p)

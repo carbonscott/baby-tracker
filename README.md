@@ -36,14 +36,19 @@ tap Save on the review screen, and every proposal can be edited there first.
 | **✨ Claude → Log it** | Type or dictate (keyboard mic): "4 oz formula at 3, then she slept till 5 and had a poopy diaper" | Proposes all the entries, or edits to existing ones ("she woke up at 4:10", "the last feed was the right side") |
 | **✨ Claude → Ask** | "When did she last poop?", "Is she eating more than last week?", "Summary for the 2-month checkup" | Queries the log itself (read-only) and answers, or writes a short report |
 
-More screenshots: [ending a nap from a photo](docs/screenshots/nap.png), [an old photo that needs a
-duration](docs/screenshots/duration.png), [fixing an entry by text](docs/screenshots/fix.png), [a summary
-for the doctor](docs/screenshots/report.png), [the feed sheet](docs/screenshots/feed.png).
+More screenshots: [ending a nap from a photo](docs/screenshots/nap.png), [an old photo: Still going /
+Ended / Don't know](docs/screenshots/end-choice.png), [an untimed feed ended by the next
+entry](docs/screenshots/ended.png), [Don't know in the Sleep sheet](docs/screenshots/manual-dont-know.png)
+and [in Edit](docs/screenshots/edit-dont-know.png), [fixing an entry by text](docs/screenshots/fix.png),
+[a summary for the doctor](docs/screenshots/report.png), [the feed sheet](docs/screenshots/feed.png).
 
 Claude sees the last ~48 h of the log, so it picks the right action: a photo of the baby awake
 while a nap timer runs proposes ending the nap at the photo's time; a photo of the baby asleep
-starts one. It never invents amounts or durations: if it can't tell how long something lasted,
-the review screen asks you. For pale/white, red, or black stool the review screen shows a short
+starts one. It never invents amounts or durations. When a sleep, breast feed, or timed activity
+has no known end, the card offers **Still going** (a running timer), **Ended…** (pick how long),
+or **Don't know** (saved without a duration), with the likely one already selected: Ended if
+something logged soon after shows it was over, Still going if it could still be happening, else
+Don't know. The manual Feed and Sleep sheets have the same **Don't know** under "Already done". For pale/white, red, or black stool the review screen shows a short
 line suggesting a check with your pediatrician (stool-color-card guidance); it makes no other
 health judgments.
 
@@ -161,7 +166,7 @@ One table, `events`. Every row is one thing that happened.
 | `id` | int | Primary key |
 | `kind` | text | `feed`, `diaper`, `sleep`, or `activity` |
 | `start_at` | text | UTC, `YYYY-MM-DDTHH:MM:SSZ` |
-| `end_at` | text / NULL | UTC. **NULL = timer still running.** Equal to `start_at` for point events (diapers, bottle feeds, activities logged as a single moment). |
+| `end_at` | text / NULL | UTC. **NULL = timer still running.** Equal to `start_at` for point events (diapers, bottle feeds, activities logged as a single moment) and for sleeps / breast feeds logged **without a duration** ("Don't know"). |
 | `data` | JSON text | Details per kind (below) |
 | `note` | text | Free text, may be empty |
 | `tz` | text | IANA time zone of the device that logged it (e.g. `America/Los_Angeles`). Use it to get local time of day. |
@@ -186,6 +191,8 @@ Conventions worth knowing:
   when counting feeds. Do the same when computing "feeds per day" or "time between feeds".
 - Time between feeds is conventionally measured **start to start**.
 - Sleep can cross midnight; split by day boundaries (in local time) when summing per day.
+- A sleep or breast feed with `end_at == start_at` happened but has **no duration logged**: count
+  it as an event, but leave it out of duration averages (it adds 0 to totals).
 - Rows can be edited or deleted after the fact, so re-read rather than append-sync.
 - Activity names are free text typed by the user. The UI reuses the existing spelling when a
   typed name matches one case-insensitively, but group by `lower(name)` to be safe.
@@ -240,7 +247,7 @@ All JSON. Writes need `Content-Type: application/json`.
 | `PATCH /api/events/{id}` | Update any of `start_at`, `end_at` (null = running again), `data`, `note` |
 | `DELETE /api/events/{id}` | Delete |
 | `GET /api/activity-names` | Distinct activity names, most recently used first |
-| `POST /api/ai/propose` | Body: `text` and/or `image` (base64 JPEG), `photo_taken_at`, `tz`, `baby_name`, `unit` (max 8 MB). Returns `{source, message, proposals, elapsed_ms, model}`; each proposal is `{op:"create", event}` (ready for `POST /api/events`) or `{op:"update", id, patch, before, after}` (ready for `PATCH`), plus `needs`, `confidence`, `why`. Saves nothing. |
+| `POST /api/ai/propose` | Body: `text` and/or `image` (base64 JPEG), `photo_taken_at`, `tz`, `baby_name`, `unit` (max 8 MB). Returns `{source, message, proposals, elapsed_ms, model}`; each proposal is `{op:"create", event}` (ready for `POST /api/events`) or `{op:"update", id, patch, before, after}` (ready for `PATCH`), plus `confidence` and `why`. A create whose end isn't known also has `open_end: {default: "running"|"ended"|"unknown", ended_at, reason}`, and its `event.end_at` matches the default (null / `ended_at` / `start_at`). Default: ended at the first later entry that shows it was over (a feed or activity ends a sleep; a sleep, activity, or other feed ends a breast feed; a sleep or other activity ends an activity; diapers never) if that gives a plausible length (5 min up to the same windows as below; otherwise it defaults to unknown, with `ended_at` kept as a hint), else running if Claude says so or it started recently (sleep ≤ 4 h, breast feed ≤ 1 h, activity ≤ 2 h), else unknown. `needs` is always `[]`. Saves nothing. |
 | `POST /api/ai/ask` | Body: `question`, `history` (`[{q, a}]`, last 6), `tz`, `baby_name`, `unit`. Returns `{answer (markdown), elapsed_ms, model, queries}`. Read-only. |
 | `GET /api/export.csv` / `GET /api/export.json` | Everything, flattened one row per event, with `start_local`, `end_local`, `duration_min`, activity `name`, `place`, stool `color`/`texture`, `ai_source`/`ai_model`/`ai_confidence`/`ai_edited`, `photo_suggested`, `photo_confidence` |
 

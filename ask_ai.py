@@ -44,7 +44,8 @@ CREATE TABLE events (        -- one row per log entry
   night_of TEXT,             -- entries starting 7 PM-6 AM: date of that evening (1 AM Nov 2 -> '2026-11-01');
                              -- NULL in the daytime. Use it for "per night" questions.
   duration_min REAL,         -- breast feeds, sleep, timed activities (minutes so far if running);
-                             -- NULL for point events: diapers, bottles, activities logged as a moment
+                             -- NULL for point events: diapers, bottles, activities logged as a moment,
+                             -- and for sleeps / breast feeds logged without a duration (end_utc = start_utc)
   running INTEGER,           -- 1 = timer still running now
   name TEXT,                 -- activity name, free text (group by lower(name))
   method TEXT,               -- feed: 'breast' | 'bottle'
@@ -67,7 +68,7 @@ CREATE TABLE feed_sessions ( -- one row per feed as the parent counts them: feed
   start_utc TEXT, start_local TEXT, local_date TEXT, local_hour INTEGER,
   end_local TEXT,            -- NULL while running
   feeds INTEGER,             -- feed rows in the session
-  breast_min REAL,           -- minutes at the breast (NULL if none)
+  breast_min REAL,           -- minutes at the breast (NULL if no breast feed in it has a duration)
   bottle_ml REAL,            -- ml from bottles with a recorded amount (NULL if none)
   bottles INTEGER,           -- bottle rows (incl. ones with no amount)
   methods TEXT,              -- 'breast' | 'bottle' | 'breast+bottle'
@@ -147,6 +148,8 @@ the last 7 days including today, "last week" = the 7 days before that, unless th
 the log's first day are partial: leave them out of daily averages (days.full_day = 1), or say so. In a \
 comparison, use the same dates for every number.
 - NULL amount/color/texture = not recorded, not zero: average over recorded values and mention what's missing.
+- end == start on a sleep or breast feed = duration not logged (duration_min NULL): it counts as an entry but \
+adds no minutes. Say how many such entries a total or average leaves out when it matters.
 - Activity names are free text: group by lower(name). Naps vs night sleep aren't labeled: use night_of (sleep \
 starting 7 PM-6 AM) and say that's the rule you used.
 - Amounts are stored in ml. {unit_rule}
@@ -266,11 +269,12 @@ def build_snapshot(rows: list[dict], tz: str, now: dt.datetime) -> sqlite3.Conne
         breast = [e for e in items if e["method"] == "breast"]
         bottles = [e for e in items if e["method"] == "bottle"]
         amounts = [e["amount_ml"] for e in bottles if e["amount_ml"] is not None]
+        breast_min = [e["duration_min"] for e in breast if e["duration_min"] is not None]   # skips ones without a duration
         running = any(e["running"] for e in items)
         conn.execute("INSERT INTO feed_sessions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (
             n, _utc(s["start"]), items[0]["start_local"], items[0]["local_date"], items[0]["local_hour"],
             None if running else _loc(s["stop"], s["zone"]), len(items),
-            round(sum(e["duration_min"] or 0 for e in breast), 1) if breast else None,
+            round(sum(breast_min), 1) if breast_min else None,
             sum(amounts) if amounts else None, len(bottles),
             "+".join(m for m in ("breast", "bottle") if any(e["method"] == m for e in items)),
             breast[0]["side"] if breast else None, ",".join(e["side"] or "?" for e in breast) or None,

@@ -136,11 +136,13 @@ class CreateTest(unittest.TestCase):
         self.assertEqual(change(item(amount=90, amount_unit="ml"))["event"]["data"]["method"], "bottle")
         self.assertIsNone(change(item(timing="running")))
 
-    def test_timed_moment_needs_duration(self):
-        c = change(item(kind="sleep", start="2026-11-02T10:00", timing="moment"))
-        self.assertEqual((c["event"]["end_at"], c["needs"]), (None, ["duration"]))
-        c = change(item(start="2026-11-02T10:00", timing="needs_duration", method="breast", side="both"))
-        self.assertEqual((c["event"]["end_at"], c["needs"]), (None, ["duration"]))
+    def test_timed_moment_has_an_open_end(self):
+        c = change(item(kind="sleep", start="2026-11-02T10:00", timing="moment"))   # Tummy time #6 at 11:00
+        self.assertEqual((c["event"]["end_at"], c["needs"], c["open_end"]["default"]),
+                         ("2026-11-02T19:00:00Z", [], "ended"))
+        c = change(item(start="2026-11-02T13:30", timing="needs_duration", method="breast", side="both"))
+        self.assertEqual((c["event"]["end_at"], c["needs"], c["open_end"]["default"]),
+                         ("2026-11-02T21:30:00Z", [], "unknown"))
 
     def test_range_end_and_duration(self):
         c = change(item(kind="sleep", start="2026-11-02T10:00", end="2026-11-02T11:15", timing="range"))
@@ -153,12 +155,20 @@ class CreateTest(unittest.TestCase):
         c = change(item(kind="sleep", start="2026-11-01T23:00", end="2026-11-01T02:00", timing="range"))
         self.assertEqual((c["event"]["start_at"], c["event"]["end_at"]), ("2026-11-02T07:00:00Z", "2026-11-02T10:00:00Z"))
 
-    def test_range_with_unusable_end_asks_duration(self):
+    def test_range_with_unusable_end_has_an_open_end(self):
         for end in ("2026-11-02T16:00", "2026-11-02T09:00", "garbage"):   # future / before start / unreadable
             c = change(item(kind="sleep", start="2026-11-02T10:00", end=end, timing="range"))
-            self.assertEqual((c["event"]["end_at"], c["needs"]), (None, ["duration"]), end)
-        c = change(item(kind="sleep", start="2026-11-02T13:00", duration_min=300, timing="range"))   # ends in future
-        self.assertEqual(c["needs"], ["duration"])
+            self.assertEqual((c["event"]["end_at"], c["open_end"]["default"]), ("2026-11-02T19:00:00Z", "ended"), end)
+        c = change(item(kind="sleep", start="2026-11-02T13:00", duration_min=300, timing="range"), ctx(events=[]))
+        self.assertEqual((c["event"]["end_at"], c["open_end"]["default"]), (None, "running"))   # ends in future
+
+    def test_known_ends_have_no_open_end(self):
+        for it in (item(kind="sleep", start="2026-11-02T10:00", end="2026-11-02T11:15", timing="range"),
+                   item(start="2026-11-02T13:30", method="bottle", amount=90, timing="running"),
+                   item(kind="diaper", pee=True, poop=False),
+                   item(kind="activity", activity_name="Bath", start="2026-11-02T12:00", timing="moment"),
+                   item(kind="activity", activity_name="Bath", start="2026-11-02T12:00")):
+            self.assertNotIn("open_end", change(it), it)
 
     def test_start_defaults_to_photo_time(self):
         photo = dt.datetime(2026, 11, 2, 21, 40, 12, tzinfo=UTC)
@@ -212,6 +222,144 @@ class CreateTest(unittest.TestCase):
         self.assertIsNone(change(item(kind="sleep", timing="running", confidence="high"))["confidence"])
         self.assertEqual(change(item(kind="sleep", timing="running", confidence=1.4))["confidence"], 1.0)
         self.assertEqual(change(item(kind="sleep", timing="running", why=" a\n b "))["why"], "a b")
+
+
+class OpenEndTest(unittest.TestCase):
+    """A create with no known end: the choice the card preselects (open_end) and the event to match."""
+
+    def open(self, events=(), now=NOW, **kw):
+        c = change(item(**kw), ctx(events=list(events), now=now))
+        self.assertEqual(c["needs"], [])
+        return c["open_end"], c["event"]
+
+    def later(self, kind, data, start="2026-11-02T21:00:00Z"):   # 13:00, an hour after the proposals below
+        return row(20, kind, start, start, data)
+
+    def test_ended_by_a_later_entry(self):
+        nap = dict(kind="sleep", start="2026-11-02T12:00", timing="needs_duration")
+        bottle = self.later("feed", {"method": "bottle", "amount_ml": 90}, "2026-11-02T21:15:00Z")
+        oe, ev = self.open([bottle], **nap)
+        self.assertEqual(oe, {"default": "ended", "ended_at": "2026-11-02T21:15:00Z",
+                              "reason": "a bottle feed was logged at 1:15 PM"})
+        self.assertEqual(ev["end_at"], "2026-11-02T21:15:00Z")
+        self.assertEqual(self.open([bottle], **{**nap, "timing": "running"})[0], oe)   # whatever Claude said
+        # the first one that shows it; entries before it or at the same time don't
+        walk = self.later("activity", {"name": "Walk"})
+        before = self.later("activity", {"name": "Play"}, "2026-11-02T19:00:00Z")
+        same = self.later("feed", {"method": "breast", "side": "left"}, "2026-11-02T20:00:00Z")
+        self.assertEqual(self.open([bottle, walk, same, before], **nap)[0],
+                         {"default": "ended", "ended_at": "2026-11-02T21:00:00Z", "reason": '"Walk" was logged at 1:00 PM'})
+
+    def test_ended_too_long_after_is_unknown(self):
+        # a breast feed at 10 AM and the next bottle at 1:15 PM: over by then, but 3 h 15 m is no guess
+        bottle = self.later("feed", {"method": "bottle", "amount_ml": 90}, "2026-11-02T21:15:00Z")
+        oe, ev = self.open([bottle], kind="feed", method="breast", side="left", start="2026-11-02T10:00")
+        self.assertEqual(oe, {"default": "unknown", "ended_at": "2026-11-02T21:15:00Z",
+                              "reason": "over by 1:15 PM (a bottle feed), too long to guess the end"})
+        self.assertEqual(ev["end_at"], ev["start_at"])   # saved without a duration unless the parent picks Ended
+        # the cap is the same window as "still going": 1 h for a breast feed, 4 h for a sleep
+        self.assertEqual(self.open([bottle], kind="feed", method="breast", side="left",
+                                   start="2026-11-02T12:15")[0]["default"], "ended")      # exactly 1 h
+        self.assertEqual(self.open([bottle], kind="feed", method="breast", side="left",
+                                   start="2026-11-02T12:14")[0]["default"], "unknown")
+        self.assertEqual(self.open([bottle], kind="sleep", start="2026-11-02T09:15")[0]["default"], "ended")   # 4 h
+        self.assertEqual(self.open([bottle], kind="sleep", start="2026-11-02T09:14")[0]["default"], "unknown")
+        # too soon: a sleeping photo 1 min before the next entry is no 1-minute nap; 5 min is the floor
+        oe, ev = self.open([bottle], kind="sleep", start="2026-11-02T13:14")
+        self.assertEqual(oe, {"default": "unknown", "ended_at": "2026-11-02T21:15:00Z",
+                              "reason": "over by 1:15 PM (a bottle feed), too soon to tell how long"})
+        self.assertEqual(ev["end_at"], ev["start_at"])
+        self.assertEqual(self.open([bottle], kind="sleep", start="2026-11-02T13:10")[0]["default"], "ended")   # 5 min
+
+    def test_what_shows_it_ended(self):
+        breast, bottle = self.later("feed", {"method": "breast", "side": "left"}), self.later("feed", {"method": "bottle"})
+        sleep, diaper = self.later("sleep", {}), self.later("diaper", {"pee": True, "poop": True})
+        walk, play = self.later("activity", {"name": "Walk"}), self.later("activity", {"name": "Play"})
+        for proposal, ends, doesnt in [
+            (dict(kind="sleep"), [breast, bottle, walk], [sleep, diaper]),
+            (dict(kind="feed", method="breast", side="left"), [breast, bottle, sleep, walk], [diaper]),
+            (dict(kind="activity", activity_name="Walk"), [sleep, walk, play], [breast, bottle, diaper]),
+        ]:
+            for e, default in [(e, "ended") for e in ends] + [(e, "unknown") for e in doesnt]:
+                oe, _ = self.open([e], start="2026-11-02T12:00", timing="needs_duration", **proposal)
+                self.assertEqual(oe["default"], default, (proposal, e["kind"], e["data"]))
+
+    def test_running(self):
+        # Claude says it's still going: running, however long ago it started
+        oe, ev = self.open(kind="sleep", start="2026-11-02T08:00", timing="running")
+        self.assertEqual(oe, {"default": "running", "ended_at": None, "reason": "started 6h 00m ago, no end logged"})
+        self.assertIsNone(ev["end_at"])
+        # Claude unsure (no timing, a moment, an unusable end): running while it could still be going
+        for kw, recent, old in [
+            (dict(kind="sleep"), "10:00", "09:59"),                                           # 4 h
+            (dict(kind="feed", method="breast", side="left"), "13:00", "12:59"),              # 1 h
+            (dict(kind="activity", activity_name="Walk", end="garbage"), "12:00", "11:59"),   # 2 h
+        ]:
+            for timing in (None, "moment", "range"):
+                if kw["kind"] == "activity" and timing != "range":
+                    continue   # an activity is then a moment, not an open end
+                self.assertEqual(self.open(start=f"2026-11-02T{recent}", timing=timing, **kw)[0]["default"],
+                                 "running", (kw, timing))
+                self.assertEqual(self.open(start=f"2026-11-02T{old}", timing=timing, **kw)[0]["default"],
+                                 "unknown", (kw, timing))
+
+    def test_unknown(self):
+        # Claude says it's over ("she napped at 1:30"): not running, however recent
+        oe, ev = self.open(kind="sleep", start="2026-11-02T13:30", timing="needs_duration")
+        self.assertEqual(oe, {"default": "unknown", "ended_at": None, "reason": "probably over, no end time given"})
+        self.assertEqual(ev["end_at"], ev["start_at"])   # saved without a duration
+        oe, _ = self.open(kind="sleep", start="2026-11-02T09:00")
+        self.assertEqual(oe["reason"], "started 5h 00m ago, no end time given")
+        oe, ev = self.open(kind="activity", activity_name="Walk", start="2026-11-02T13:30", timing="needs_duration")
+        self.assertEqual((oe["default"], ev["end_at"]), ("unknown", ev["start_at"]))   # an activity: a moment
+
+    def test_dst_uses_real_time(self):
+        # fall back: 00:45 PDT -> 04:15 PST on 2026-11-01 is 4.5 h (3.5 h on the wall clock)
+        now = dt.datetime(2026, 11, 1, 12, 15, tzinfo=UTC)
+        self.assertEqual(self.open(kind="sleep", start="2026-11-01T00:45", now=now)[0],
+                         {"default": "unknown", "ended_at": None, "reason": "started 4h 30m ago, no end time given"})
+        # spring forward: 01:30 PST -> 03:15 PDT on 2027-03-14 is 45 min (1 h 45 min on the wall clock)
+        now = dt.datetime(2027, 3, 14, 10, 15, tzinfo=UTC)
+        self.assertEqual(self.open(kind="feed", method="breast", side="left", start="2027-03-14T01:30", now=now)[0],
+                         {"default": "running", "ended_at": None, "reason": "started 45m ago, no end logged"})
+        # a later entry across the change: its local time
+        bottle = self.later("feed", {"method": "bottle"}, "2027-03-14T10:05:00Z")   # 03:05 PDT
+        self.assertEqual(self.open([bottle], kind="sleep", start="2027-03-14T01:30", now=now)[0]["reason"],
+                         "a bottle feed was logged at 3:05 AM")
+
+    def test_reason_times(self):
+        c = ctx()
+        self.assertEqual(propose_ai.clock(utc("2026-11-02T21:15:00Z"), c), "1:15 PM")
+        self.assertEqual(propose_ai.clock(utc("2026-11-02T07:40:00Z"), c), "yesterday 11:40 PM")
+        self.assertEqual(propose_ai.clock(utc("2026-10-31T16:05:00Z"), c), "Sat 9:05 AM")
+
+    def test_overlap_follows_the_default(self):
+        nap = row(31, "sleep", "2026-11-02T20:30:00Z", "2026-11-02T20:45:00Z")                         # 12:30-12:45
+        bottle = row(32, "feed", "2026-11-02T21:15:00Z", "2026-11-02T21:15:00Z", {"method": "bottle"})  # 13:15
+        no_duration = row(33, "sleep", "2026-11-02T20:00:00Z", "2026-11-02T20:00:00Z")                  # 12:00
+
+        def kept(events, **kw):
+            c = ctx(events=events)
+            with redirect_stderr(io.StringIO()):
+                return propose_ai.drop_double_logs([change(item(kind="sleep", **kw), c)], c) != []
+        # ended (at the 1:15 bottle): 12:00-1:15, over the 12:30 nap
+        self.assertFalse(kept([bottle, nap], start="2026-11-02T12:00", timing="needs_duration"))
+        # unknown: just its start
+        self.assertTrue(kept([nap], start="2026-11-02T12:00", timing="needs_duration"))
+        self.assertFalse(kept([nap], start="2026-11-02T12:35", timing="needs_duration"))
+        self.assertFalse(kept([no_duration], start="2026-11-02T12:03", timing="needs_duration"))   # the same one
+        # running: from its start on
+        self.assertFalse(kept([nap], start="2026-11-02T12:00", timing="running"))
+        self.assertTrue(kept([nap], start="2026-11-02T12:50", timing="running"))
+
+    def test_context_shows_entries_without_a_duration(self):
+        evs = [row(40, "sleep", "2026-11-02T20:00:00Z", "2026-11-02T20:00:00Z"),
+               row(41, "feed", "2026-11-02T19:00:00Z", "2026-11-02T19:00:00Z", {"method": "breast", "side": "left"}),
+               row(42, "activity", "2026-11-02T18:00:00Z", "2026-11-02T18:00:00Z", {"name": "Bath"})]
+        text = propose_ai.build_context(ctx(events=evs), None)
+        self.assertIn("#40 | 2026-11-02 12:00 (no duration logged) | sleep", text)
+        self.assertIn("#41 | 2026-11-02 11:00 (no duration logged) | breast feed, left side", text)
+        self.assertIn('#42 | 2026-11-02 10:00 | activity "Bath"', text)
 
 
 class UpdateTest(unittest.TestCase):
@@ -284,7 +432,7 @@ class SideAndTimersTest(unittest.TestCase):
             overlap = change(item(kind="sleep", start="2026-11-02T12:30", end="2026-11-02T13:30", timing="range"), c)
             before = change(item(kind="sleep", start="2026-11-02T10:00", end="2026-11-02T13:05", timing="range"), c)
             self.assertEqual(keep([overlap, before]), [before])
-            # an old photo of a nap that's already logged (needs duration inside #9): dropped
+            # an old photo of a nap that's already logged (no duration, inside #9): dropped
             inside = change(item(kind="sleep", start="2026-11-02T13:30", timing="needs_duration"), c)
             self.assertEqual(keep([inside]), [])
             # a breast feed inside the logged one #8 (12:40-12:55); a bottle at that time is fine
@@ -562,6 +710,26 @@ class ProposeEndpointTest(unittest.TestCase):
         updated = server.update_event(update["id"], update["patch"])
         self.assertEqual({k: updated[k] for k in ("start_at", "end_at", "data", "note")},
                          {k: update["after"][k] for k in ("start_at", "end_at", "data", "note")})
+
+    def test_open_ends_save_as_is(self):
+        structured = {"message": "", "items": [
+            item(kind="sleep", start=self.local(300), timing="needs_duration"),   # the feed 3 h ago ended it
+            item(kind="feed", start=self.local(10), timing="running", method="breast", side="right"),
+            item(kind="activity", activity_name="Walk", start=self.local(30), timing="needs_duration"),
+            item(kind="feed", start=self.local(5), method="bottle", amount=60),
+        ]}
+        out, _, _ = self.propose(structured, {"text": "napped this morning, nursing on the right, ..."})
+        self.assertEqual(out["message"], "")   # nothing left out
+        sleep, feed, walk, bottle = out["proposals"]
+        self.assertEqual(sleep["open_end"]["ended_at"], self.feed["start_at"])
+        self.assertEqual([p["open_end"]["default"] for p in (sleep, feed, walk)], ["ended", "running", "unknown"])
+        self.assertEqual([p["event"]["end_at"] for p in (sleep, feed, walk)],
+                         [self.feed["start_at"], None, walk["event"]["start_at"]])
+        self.assertNotIn("open_end", bottle)
+        for p in out["proposals"]:
+            self.assertEqual(p["needs"], [])
+            saved = server.create_event({**p["event"], "tz": "America/Los_Angeles"}, None)
+            self.assertEqual({k: saved[k] for k in p["event"]}, p["event"])
 
     def test_photo(self):
         taken = self.now - dt.timedelta(minutes=12)
