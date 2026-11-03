@@ -40,7 +40,8 @@ More screenshots: [ending a nap from a photo](docs/screenshots/nap.png), [an old
 Ended / Don't know](docs/screenshots/end-choice.png), [an untimed feed ended by the next
 entry](docs/screenshots/ended.png), [Don't know in the Sleep sheet](docs/screenshots/manual-dont-know.png)
 and [in Edit](docs/screenshots/edit-dont-know.png), [fixing an entry by text](docs/screenshots/fix.png),
-[a summary for the doctor](docs/screenshots/report.png), [the feed sheet](docs/screenshots/feed.png).
+[a summary for the doctor](docs/screenshots/report.png), [the feed sheet](docs/screenshots/feed.png),
+[a long note: the box grows to fit](docs/screenshots/note-card.png).
 
 Claude sees the last ~48 h of the log, so it picks the right action: a photo of the baby awake
 while a nap timer runs proposes ending the nap at the photo's time; a photo of the baby asleep
@@ -168,7 +169,7 @@ One table, `events`. Every row is one thing that happened.
 | `start_at` | text | UTC, `YYYY-MM-DDTHH:MM:SSZ` |
 | `end_at` | text / NULL | UTC. **NULL = timer still running.** Equal to `start_at` for point events (diapers, bottle feeds, activities logged as a single moment) and for sleeps / breast feeds logged **without a duration** ("Don't know"). |
 | `data` | JSON text | Details per kind (below) |
-| `note` | text | Free text, may be empty |
+| `note` | text | Free text, may be empty; up to 2000 characters, line breaks kept. The note box grows with the text and scrolls past about 10 lines |
 | `tz` | text | IANA time zone of the device that logged it (e.g. `America/Los_Angeles`). Use it to get local time of day. |
 | `logged_by` | text / NULL | exe.dev email of whoever logged it |
 | `created_at`, `updated_at` | text | UTC bookkeeping |
