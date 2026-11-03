@@ -307,8 +307,9 @@ def create_event(body: dict, user: str | None) -> dict:
 def apply_patch(ev: dict, body: dict) -> dict:
     """A copy of row `ev` with a PATCH body applied and validated. Writes nothing."""
     ev = {**ev, "data": dict(ev["data"])}
-    # An activity logged as a single moment (end == start) stays a moment when its time is edited.
-    was_moment = ev["kind"] == "activity" and ev["end_at"] == ev["start_at"]
+    # An entry without a duration (end == start: an activity logged as a moment, a sleep or breast
+    # feed logged with no duration) stays that way when only its start is edited.
+    no_duration = ev["end_at"] == ev["start_at"]
     if "kind" in body:
         if body["kind"] not in KINDS:
             raise bad(f"kind must be one of: {', '.join(KINDS)}")
@@ -317,7 +318,7 @@ def apply_patch(ev: dict, body: dict) -> dict:
         ev["start_at"] = parse_ts(body["start_at"], "start_at") or ev["start_at"]
     if "end_at" in body:
         ev["end_at"] = parse_ts(body["end_at"], "end_at")
-    elif was_moment:
+    elif no_duration:
         ev["end_at"] = ev["start_at"]
     if "data" in body:
         new = body["data"]

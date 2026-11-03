@@ -84,5 +84,34 @@ class ProductionRowsTest(unittest.TestCase):
         self.assertEqual((rows[2]["photo_confidence"], rows[3]["name"]), (0.9, "Walk"))
 
 
+class NoDurationTest(unittest.TestCase):
+    """A sleep or breast feed saved with "Don't know" has end == start: no duration logged."""
+
+    def test_editing_the_start_keeps_it_without_a_duration(self):
+        start, earlier = "2026-11-02T20:00:00Z", "2026-11-02T19:30:00Z"
+        for kind, data in (("sleep", {}), ("feed", {"method": "breast", "side": "left"}), ("activity", {"name": "Bath"})):
+            ev = {"id": 1, "kind": kind, "start_at": start, "end_at": start, "data": data, "note": ""}
+            after = server.apply_patch(ev, {"start_at": earlier})
+            self.assertEqual((after["start_at"], after["end_at"]), (earlier, earlier), kind)
+            self.assertEqual(server.apply_patch(ev, {"start_at": earlier, "end_at": "2026-11-02T20:10:00Z"})["end_at"],
+                             "2026-11-02T20:10:00Z")   # given an end, it has a duration
+            self.assertIsNone(server.apply_patch(ev, {"end_at": None})["end_at"])   # Still going
+        timed = {"id": 1, "kind": "sleep", "start_at": start, "end_at": "2026-11-02T21:00:00Z", "data": {}, "note": ""}
+        self.assertEqual(server.apply_patch(timed, {"start_at": earlier})["end_at"], "2026-11-02T21:00:00Z")
+
+    def test_export_has_no_duration(self):
+        d = tempfile.TemporaryDirectory()
+        self.addCleanup(d.cleanup)
+        with mock.patch.object(server, "DATA_DIR", Path(d.name)), \
+                mock.patch.object(server, "DB_PATH", Path(d.name) / "baby.db"):
+            server.init_db()
+            for kind, data in (("sleep", {}), ("feed", {"method": "breast", "side": "both"})):
+                server.create_event({"kind": kind, "start_at": "2026-11-02T20:00:00Z", "end_at": "2026-11-02T20:00:00Z",
+                                     "data": data, "tz": "America/Los_Angeles"}, None)
+            rows = server.export_rows()
+        self.assertEqual([(r["kind"], r["duration_min"], r["end_local"]) for r in rows],
+                         [("sleep", None, "2026-11-02T12:00:00-08:00"), ("feed", None, "2026-11-02T12:00:00-08:00")])
+
+
 if __name__ == "__main__":
     unittest.main()

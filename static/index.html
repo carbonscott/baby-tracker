@@ -153,8 +153,11 @@
   .pc-note { margin-top: 6px; font-size: 15px; overflow-wrap: anywhere; }
   .pc-why { margin-top: 8px; font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
   .pc-done { margin-top: 8px; font-weight: 700; color: var(--c); }
-  .need { margin: 10px 0 4px; }
-  .need > label { color: var(--c); font-size: 15px; font-weight: 700; }
+  /* an entry whose end Claude doesn't know: Still going | Ended… | Don't know */
+  .oe { margin: 10px 0 2px; }
+  .oe .seg button { padding: 13px 2px; font-size: 15px; }
+  .oe .field { margin: 10px 0 0; }
+  .chip:disabled { opacity: .35; }
   .pc-editor { margin-top: 6px; padding-top: 2px; border-top: 1px solid var(--line); }
   .tag { display: inline-block; margin-right: 8px; padding: 1px 8px; border: 1px solid var(--c); border-radius: 999px;
     font-size: 12px; font-weight: 600; color: var(--c); vertical-align: 3px; }
@@ -323,6 +326,12 @@ const diaperText = (d) => (d.pee && d.poop ? 'Pee + poop' : d.poop ? 'Poop' : d.
 // Point events have no duration: diapers, bottles, and activities logged as a single moment.
 const isPoint = (e) => e.kind === 'diaper' || (e.kind === 'feed' && e.data.method === 'bottle')
   || (e.kind === 'activity' && e.end_at != null && e.end_at === e.start_at);
+// Sleeps and breast feeds saved with "Don't know" have no duration: end == start. (For activities that is a moment.)
+const noDuration = (e) => (e.kind === 'sleep' || (e.kind === 'feed' && e.data.method === 'breast'))
+  && e.end_at != null && e.start_at != null && ms(e.end_at) === ms(e.start_at);
+const durText = (e) => (noDuration(e) ? 'no duration' : fmtDur(ms(e.end_at) - ms(e.start_at)));
+// Kinds that can run for a while (and so can be running, ended, or have no known end).
+const timedKind = (e) => e.kind === 'sleep' || e.kind === 'activity' || (e.kind === 'feed' && e.data.method === 'breast');
 const cleanName = (s) => String(s || '').trim().replace(/\s+/g, ' ');
 const sameName = (a, b) => cleanName(a).toLowerCase() === cleanName(b).toLowerCase();
 const runningActivities = () => events.filter((e) => e.kind === 'activity' && e.end_at == null);
@@ -340,7 +349,7 @@ function describe(e) {
 }
 function shortFeed(e) {
   if (e.data.method === 'bottle') return e.data.amount_ml != null ? fmtAmount(e.data.amount_ml) : 'Bottle';
-  return `${SIDE_SHORT[e.data.side] || '?'} ${fmtDur(endMs(e) - ms(e.start_at))}`;
+  return `${SIDE_SHORT[e.data.side] || '?'} ${noDuration(e) ? '—' : fmtDur(endMs(e) - ms(e.start_at))}`;
 }
 const KIND_EMOJI = { diaper: '🧷', sleep: '😴', activity: '⭐' };
 const kindEmoji = (e) => (e.kind === 'feed' ? (e.data.method === 'bottle' ? '🍼' : '🤱') : KIND_EMOJI[e.kind] || '•');
@@ -534,7 +543,9 @@ function renderTiles() {
       lastD ? `ago · ${diaperText(lastD.data)}` : 'Tap to log', () => openDiaperSheet()),
     os
       ? tile('sleep running', '😴', 'Sleeping', since(ms(os.start_at)), 'tap when awake', () => stopEvent(os))
-      : tile('sleep', '🌙', lastSleep ? 'Awake' : 'Sleep', lastSleep ? since(ms(lastSleep.end_at)) : '—',
+      : lastSleep && noDuration(lastSleep)   // we don't know when she woke up: don't claim "Awake"
+        ? tile('sleep', '🌙', 'Sleep', since(ms(lastSleep.start_at)), 'ago · last sleep: no duration', () => openSleepSheet())
+        : tile('sleep', '🌙', lastSleep ? 'Awake' : 'Sleep', lastSleep ? since(ms(lastSleep.end_at)) : '—',
         lastSleep ? `last sleep ${fmtDur(ms(lastSleep.end_at) - ms(lastSleep.start_at))}` : 'Tap to start', () => openSleepSheet()),
     runA
       ? tile('activity running', '⭐', 'Activity', since(ms(runA.start_at)), `${runA.data.name} · now`, () => openActivitySheet())
@@ -602,18 +613,19 @@ function renderTimeline() {
 
 function row(e) {
   const start = ms(e.start_at);
-  const timed = !isPoint(e);
+  const timed = !isPoint(e), nd = noDuration(e);
   const subParts = [];
   if (e.data.ai) subParts.push(`✨ Claude${String(e.data.ai.source || '').includes('photo') ? ' 📷' : ''}`);
   else if (e.data.photo) subParts.push('📷 from photo');
-  if (timed && e.end_at) subParts.push(`until ${fmtTime(ms(e.end_at))}`);
+  if (nd) subParts.push('no duration');
+  else if (timed && e.end_at) subParts.push(`until ${fmtTime(ms(e.end_at))}`);
   subParts.push(...detailBits(e));
   if (e.note) subParts.push(e.note);
   return h('button', { class: `row ${e.kind}`, onclick: () => openEdit(e) },
     h('span', { class: 'time' }, fmtTime(start)),
     h('span', { class: 'dot' }),
     h('span', { class: 'desc' }, h('div', {}, describe(e)), subParts.length ? h('div', { class: 'sub' }, subParts.join(' · ')) : null),
-    h('span', { class: 'dur' }, timed ? (e.end_at ? fmtDur(ms(e.end_at) - start) : h('span', { class: 'live' }, 'now')) : ''));
+    h('span', { class: 'dur' }, !timed ? '' : nd ? '—' : e.end_at ? fmtDur(ms(e.end_at) - start) : h('span', { class: 'live' }, 'now')));
 }
 
 // Live counters: update text in place every second (no re-render, so taps are never lost).
@@ -710,16 +722,27 @@ function whenPicker(label, initial) {
   box.input.addEventListener('input', () => { chosen = 'typed'; chips.forEach((c) => c.classList.remove('on')); });
   const el = field(label, h('div', { class: 'chips' }, chips), box.input, box.preview);
   el.get = () => (chosen === null ? new Date() : chosen === 'typed' ? box.read() : chosen);
+  el.setLabel = (text) => { el.querySelector('label').textContent = text; };
   return el;
 }
 
-function durPicker(label, presets) {
+// Minutes from chips or the box. onUnknown (optional) adds a "Don't know" chip: get() then returns 'unknown'.
+function durPicker(label, presets, onUnknown) {
   const input = h('input', { type: 'number', class: 'num', inputmode: 'numeric', min: 1, placeholder: 'minutes' });
-  const chips = presets.map(([mins, text]) => h('button', { type: 'button', class: 'chip', onclick: () => { input.value = mins; mark(); } }, text));
-  const mark = () => chips.forEach((c, i) => c.classList.toggle('on', Number(input.value) === presets[i][0]));
-  input.addEventListener('input', mark);
-  const el = field(label, h('div', { class: 'chips' }, chips), input);
-  el.get = () => { const v = Number(input.value); return v > 0 ? v : null; };
+  let unknown = false;
+  const chips = presets.map(([mins, text]) => h('button', { type: 'button', class: 'chip', onclick: () => { input.value = mins; set(false); } }, text));
+  const dunno = onUnknown ? h('button', { type: 'button', class: 'chip', onclick: () => { input.value = ''; set(true); } }, "Don't know") : null;
+  const mark = () => {
+    chips.forEach((c, i) => c.classList.toggle('on', !unknown && Number(input.value) === presets[i][0]));
+    if (dunno) dunno.classList.toggle('on', unknown);
+  };
+  function set(u) {
+    if (u !== unknown) { unknown = u; if (onUnknown) onUnknown(u); }
+    mark();
+  }
+  input.addEventListener('input', () => set(false));
+  const el = field(label, h('div', { class: 'chips' }, chips, dunno), input);
+  el.get = () => { if (unknown) return 'unknown'; const v = Number(input.value); return v > 0 ? v : null; };
   return el;
 }
 
@@ -785,13 +808,16 @@ function timerOrPast(pane, act, o) {
       act.replaceChildren(h('button', { class: 'btn primary', onclick: () => o.onPoint(() => { const d = when.get(); checkPast(d); return d; }) }, o.pointText));
     } else {
       const when = whenPicker(o.endLabel, o.when);
-      const dur = durPicker('How long', o.durations);
+      // "Don't know" (feeds, sleep): saved with no duration, start = end = about when it happened
+      const dur = durPicker('How long', o.durations, o.unknownOk ? (u) => when.setLabel(u ? 'Around when' : o.endLabel) : null);
       sub.replaceChildren(when, dur);
       act.replaceChildren(h('button', {
         class: 'btn primary',
         onclick: () => o.onLog(() => {
           const end = when.get(); checkPast(end);
-          const m = dur.get(); if (!m) throw new Error('Pick how long it lasted');
+          const m = dur.get();
+          if (m === 'unknown') return [end, end];
+          if (!m) throw new Error(o.unknownOk ? "Pick how long it lasted (or Don't know)" : 'Pick how long it lasted');
           return [new Date(end.getTime() - m * 60e3), end];
         }),
       }, o.logText));
@@ -834,12 +860,12 @@ function openFeedSheet(pre = {}) {
         when: pre.when,
         timerLabel: 'Start timer', pastLabel: 'Already done',
         startLabel: 'Started', endLabel: 'Finished', startText: 'Start feeding', logText: 'Log feed',
-        durations: DURATIONS.feed,
+        durations: DURATIONS.feed, unknownOk: true,
         onStart: (get) => run(() => startTimer('feed', data(), get(), note.value), (r) => `Feeding · ${SIDE[r.data.side]}${atText(r.start_at)}`, (r) => del(r.id)),
         onLog: (get) => run(() => {
           const [a, b] = get();
           return post({ kind: 'feed', start_at: a.toISOString(), end_at: b.toISOString(), data: data(), note: note.value });
-        }, (r) => `Logged feed · ${fmtDur(ms(r.end_at) - ms(r.start_at))}${atText(r.start_at)}`, (r) => del(r.id)),
+        }, (r) => `Logged feed · ${durText(r)}${atText(r.start_at)}`, (r) => del(r.id)),
       });
     }
   }
@@ -869,12 +895,12 @@ function openSleepSheet(pre = {}) {
     when: pre.when,
     timerLabel: 'Start timer', pastLabel: 'Already done',
     startLabel: 'Fell asleep', endLabel: 'Woke up', startText: 'Start sleep', logText: 'Log sleep',
-    durations: DURATIONS.sleep,
+    durations: DURATIONS.sleep, unknownOk: true,
     onStart: (get) => run(() => startTimer('sleep', {}, get(), note.value), (r) => `Sleep started${atText(r.start_at)}`, (r) => del(r.id)),
     onLog: (get) => run(() => {
       const [a, b] = get();
       return post({ kind: 'sleep', start_at: a.toISOString(), end_at: b.toISOString(), data: {}, note: note.value });
-    }, (r) => `Logged sleep · ${fmtDur(ms(r.end_at) - ms(r.start_at))}${atText(r.start_at)}`, (r) => del(r.id)),
+    }, (r) => `Logged sleep · ${durText(r)}${atText(r.start_at)}`, (r) => del(r.id)),
   });
   openSheet('Sleep', 'sleep', h('div', {}, pane, field('Note', note), act));
 }
@@ -1088,13 +1114,46 @@ function fillPlaces() {
   $('#placeList').replaceChildren(...[...seen.values()].slice(0, 12).map((p) => h('option', { value: p })));
 }
 
+// The end of a timed entry has three states. "Don't know" saves it with no duration (end = start).
+const END_CHOICES = [['running', 'Still going'], ['ended', 'Ended…'], ['unknown', "Don't know"]];
+const endState = (e) => (e.end_at == null ? 'running' : ms(e.end_at) === ms(e.start_at) ? 'unknown' : 'ended');
+const sameTime = (a, b) => (a == null || b == null ? a == b : ms(a) === ms(b));
+
+// "Ended" in the edit sheet and in a card's editor: Still going | Ended… (+ a time box) | Don't know.
+function endEditor(e) {
+  const init = endState(e);
+  const box = dtBox(init === 'ended' ? e.end_at : null);
+  const boxIn = box.input.value;
+  const pane = h('div', {}, box.input, box.preview);
+  const state = seg(END_CHOICES, init, () => pane.classList.toggle('hidden', state.get() !== 'ended'));
+  pane.classList.toggle('hidden', init !== 'ended');
+  const el = field('Ended', state, pane);
+  // The end to save for a given start: null = still going, the start itself = no duration,
+  // undefined = "Ended…" without a valid time yet.
+  el.endFor = (startIso) => {
+    const s = state.get();
+    if (s === 'running') return null;
+    if (s === 'unknown') return startIso;
+    if (init === 'ended' && box.input.value === boxIn) return e.end_at;   // untouched: keep it exactly
+    const d = box.read();
+    return d && !isNaN(d) ? d.toISOString() : undefined;
+  };
+  return el;
+}
+// Throws a message for the parent if `end` (from endFor) can't be saved after `start`.
+function checkEnd(start, end) {
+  if (end === undefined) throw new Error('Pick when it ended');
+  if (end == null || sameTime(end, start)) return;
+  checkPast(new Date(end));
+  if (ms(end) < ms(start)) throw new Error('The end is before the start.');
+}
+
 function openEdit(e) {
-  const start = dtBox(e.start_at), end = dtBox(e.end_at);
-  const origStart = start.input.value, origEnd = end.input.value;
+  const start = dtBox(e.start_at);
+  const origStart = start.input.value;
   const note = noteInput();
   note.value = e.note || '';
-  const endField = field('Ended', end.input, end.preview, h('div', { class: 'hint' }, 'Empty = still going. ',
-    h('button', { type: 'button', class: 'linkish', onclick: () => { end.input.value = ''; end.show(); } }, 'Clear')));
+  const endField = endEditor(e);
   const timed = (method) => e.kind === 'sleep' || (e.kind === 'feed' && method === 'breast') || (e.kind === 'activity' && !isPoint(e));
   const det = detailsEditor(e.kind, e.data, (m) => endField.classList.toggle('hidden', !timed(m)));
   endField.classList.toggle('hidden', !timed(e.data.method));
@@ -1102,8 +1161,11 @@ function openEdit(e) {
   const save = () => run(() => {
     const body = { data: det.get(), note: note.value };
     if (start.input.value !== origStart) { const d = start.read(); checkPast(d); body.start_at = d.toISOString(); }
-    if (!endField.classList.contains('hidden') && end.input.value !== origEnd) {
-      if (end.input.value) { const d = end.read(); checkPast(d); body.end_at = d.toISOString(); } else body.end_at = null;
+    if (!endField.classList.contains('hidden')) {
+      const s = body.start_at || e.start_at;
+      const end = endField.endFor(s);   // "Don't know" follows an edited start
+      checkEnd(s, end);
+      if (!sameTime(end, e.end_at)) body.end_at = end;
     }
     return patch(e.id, body);
   }, 'Saved', () => patch(e.id, { start_at: e.start_at, end_at: e.end_at, data: e.data, note: e.note }));
@@ -1265,14 +1327,42 @@ function makeCard(p) {
   } else {
     return null;
   }
-  const needsDur = p.op === 'create' && Array.isArray(p.needs) && p.needs.includes('duration') && orig.end_at == null;
-  return { p, before, orig, cur: entry(orig), needsDur, mins: null, include: true, edited: false, done: null };
+  const oe = p.op === 'create' ? openEnd(p, orig) : null;
+  if (oe) orig.end_at = oe.default === 'running' ? null : oe.default === 'unknown' ? orig.start_at : oe.ended_at;
+  // choice: the parent's Still going / Ended… / Don't know; endMins (a duration chip) or endAt (a time) for Ended…
+  return { p, before, orig, cur: entry(orig), oe, choice: oe && oe.default, endMins: null, endAt: oe && oe.ended_at,
+    missing: false, include: true, edited: false, done: null };
 }
-// Claude knew the start but not how long (e.g. an old breastfeeding photo): "How long?" is required.
-const needsDuration = (c) => c.needsDur && !isPoint(c.cur);
+// Claude knew the start but not the end: the card offers Still going | Ended… | Don't know with Claude's pick
+// (open_end.default) preselected, so Save always works. Older answers without open_end: a running create
+// (default Still going) or needs: ['duration'] (default Don't know).
+function openEnd(p, ev) {
+  if (!timedKind(ev)) return null;
+  const o = p.open_end && typeof p.open_end === 'object' ? p.open_end : null;
+  if (!o && ev.end_at != null) return null;   // a known end, or a moment: nothing to choose
+  const iso = (t) => (typeof t === 'string' && !isNaN(Date.parse(t)) ? t : null);
+  let def = o && END_CHOICES.some(([v]) => v === o.default) ? o.default : null;
+  if (!def) {
+    const needs = Array.isArray(p.needs) && p.needs.includes('duration');
+    def = ev.end_at == null ? (needs ? 'unknown' : 'running') : endState(ev);
+  }
+  let endedAt = o ? iso(o.ended_at) : null;
+  if (!endedAt && endState(ev) === 'ended') endedAt = ev.end_at;
+  return { default: def, ended_at: endedAt, reason: o ? String(o.reason || '').trim().slice(0, 200) : '' };
+}
+// The choice applies while the entry is timed (editing a breast feed into a bottle makes it a point event).
+const hasChoice = (c) => !!c.oe && timedKind(c.cur);
+function chosenEnd(c, start) {
+  if (c.choice === 'running') return null;
+  if (c.choice === 'unknown') return start;
+  if (c.endMins && start) return new Date(ms(start) + c.endMins * 60e3).toISOString();
+  return c.endAt || null;
+}
+// "Ended…" without an end yet: Save asks for one.
+const endMissing = (c) => (hasChoice(c) ? c.choice === 'ended' && !chosenEnd(c, c.cur.start_at) : c.missing);
 function finalEntry(c) {
   const ev = JSON.parse(JSON.stringify(c.cur));
-  if (needsDuration(c)) ev.end_at = c.mins && ev.start_at ? new Date(ms(ev.start_at) + c.mins * 60e3).toISOString() : null;
+  if (hasChoice(c)) ev.end_at = chosenEnd(c, ev.start_at);
   return ev;
 }
 const canon = (d) => JSON.stringify(Object.keys(d).filter((k) => d[k] != null).sort().map((k) => [k, d[k]]));
@@ -1286,21 +1376,24 @@ function renderCard(rv, c, multi) {
     onclick: () => { c.include = !c.include; check.setAttribute('aria-checked', String(c.include)); rv.redraw(); },
   }, '✓') : null;
   const editBtn = h('button', { type: 'button', class: 'btn pc-edit', onclick: () => toggleEdit() }, 'Edit');
-  const dur = c.needsDur ? durPicker('How long? (needed to save)', DURATIONS[c.cur.kind] || DURATIONS.activity) : null;
-  if (dur) dur.classList.add('need');
-  if (dur) for (const t of ['click', 'input']) dur.addEventListener(t, () => { c.mins = dur.get(); c.refresh(); });
+  const oe = c.oe ? openEndChoice(c) : null;
   const edWrap = h('div', { class: 'pc-editor hidden' });
   let editor = null;
-  c.el = h('div', { class: `pcard ${c.cur.kind}` }, h('div', { class: 'pc-head' }, check, title, editBtn), lead, dur, body, edWrap);
+  c.el = h('div', { class: `pcard ${c.cur.kind}` }, h('div', { class: 'pc-head' }, check, title, editBtn), lead, oe, body, edWrap);
 
   function toggleEdit() {
     if (!editor) {
-      editor = cardEditor(c, () => { c.cur = editor.read(); c.edited = !sameEntry(c.cur, c.orig); c.refresh(); });
+      editor = cardEditor(c, () => { c.cur = editor.read(); c.touch(); });
       edWrap.append(editor.el);
     }
     const open = !edWrap.classList.toggle('hidden');
     editBtn.textContent = open ? 'Done' : 'Edit';
   }
+  // Anything the parent changes (Edit, or a choice other than Claude's) counts as edited (data.ai.edited).
+  c.touch = () => {
+    c.edited = !sameEntry(finalEntry(c), c.orig) || (!!c.oe && c.choice !== c.oe.default);
+    c.refresh();
+  };
   c.refresh = () => {
     const ev = finalEntry(c);
     c.el.classList.toggle('off', !c.include);
@@ -1309,7 +1402,7 @@ function renderCard(rv, c, multi) {
     const [first, ...rest] = cardLines(c, ev);
     lead.replaceChildren(first);
     body.replaceChildren(...rest);
-    if (dur) dur.classList.toggle('hidden', !needsDuration(c) || !!c.done);
+    if (oe) oe.paint();
     editBtn.classList.toggle('hidden', !!c.done);
     if (check) check.classList.toggle('hidden', !!c.done);
     if (c.done) edWrap.classList.add('hidden');
@@ -1317,22 +1410,62 @@ function renderCard(rv, c, multi) {
   return c.el;
 }
 
+// Still going | Ended… | Don't know, under the time line of a card whose end Claude doesn't know.
+// Ended… shows duration chips and an end-time box (prefilled when Claude saw what ended it).
+function openEndChoice(c) {
+  const choice = seg(END_CHOICES, c.choice, (v) => { c.choice = v; c.touch(); });
+  const reason = h('div', { class: 'hint oe-reason' });
+  const durs = DURATIONS[c.cur.kind] || DURATIONS.activity;
+  const chips = durs.map(([mins, text]) => h('button', {
+    type: 'button', class: 'chip', onclick: () => { c.endMins = mins; c.touch(); },
+  }, text));
+  const box = dtBox(c.endAt);
+  const typed = () => { c.endMins = null; const d = box.read(); c.endAt = d && !isNaN(d) ? d.toISOString() : null; c.touch(); };
+  box.input.addEventListener('input', typed);
+  box.input.addEventListener('change', typed);
+  const endLabel = h('label', {});
+  const pane = h('div', { class: 'oe-ended' }, field('How long', h('div', { class: 'chips' }, chips)),
+    h('div', { class: 'field' }, endLabel, box.input, box.preview));
+  const el = h('div', { class: 'oe' }, choice, reason, pane);
+  el.paint = () => {
+    el.classList.toggle('hidden', !hasChoice(c) || !!c.done);
+    const ended = c.choice === 'ended';
+    pane.classList.toggle('hidden', !ended);
+    const label = (v) => END_CHOICES.find((x) => x[0] === v)[1];
+    reason.textContent = c.choice === c.oe.default ? cap(c.oe.reason)
+      : `Claude suggested ${label(c.oe.default)}${c.oe.reason ? ` · ${c.oe.reason}` : ''}`;
+    reason.classList.toggle('hidden', !reason.textContent);
+    if (!ended) return;
+    endLabel.textContent = c.cur.kind === 'sleep' ? 'Woke up' : 'Ended at';
+    const start = ms(c.cur.start_at), end = chosenEnd(c, c.cur.start_at);
+    const mins = c.endMins || (end && start ? Math.round((ms(end) - start) / 60e3) : null);   // Claude's or a typed end can match a chip
+    chips.forEach((chip, i) => {
+      chip.classList.toggle('on', mins === durs[i][0]);
+      chip.disabled = !start || start + durs[i][0] * 60e3 > Date.now() + 60e3;   // would end in the future
+    });
+    if (c.endMins && start) {   // a chip: the box shows the end it gives (it follows an edited start)
+      box.input.value = toLocalInput(new Date(start + c.endMins * 60e3));
+      box.show();
+    }
+  };
+  return el;
+}
+
 // The edit sheet's controls, inline in a card. onChange runs after every tap or keystroke.
 function cardEditor(c, onChange) {
   const o = c.cur;
-  const moment = o.kind === 'activity' && o.end_at != null && o.end_at === o.start_at;
+  const moment = !c.oe && o.kind === 'activity' && o.end_at != null && o.end_at === o.start_at;
   const det = detailsEditor(o.kind, o.data, () => layout());
-  const start = dtBox(o.start_at), end = dtBox(o.end_at);
-  const startIn = start.input.value, endIn = end.input.value;
+  const start = dtBox(o.start_at);
+  const startIn = start.input.value;
   const note = h('textarea', { class: 'txt', rows: 2, maxlength: 2000, placeholder: 'Optional' });
   note.value = o.note;
   const startField = field('Started', start.input, start.preview);
-  const endField = field('Ended', end.input, end.preview, h('div', { class: 'hint' }, 'Empty = still going. ',
-    h('button', { type: 'button', class: 'linkish', onclick: () => { end.input.value = ''; end.show(); } }, 'Clear')));
+  const endField = endEditor(o);
   const point = () => { const d = det.get(); return o.kind === 'diaper' || (o.kind === 'feed' && d.method === 'bottle') || moment; };
   function layout() {
     startField.firstChild.textContent = point() ? 'Time' : 'Started';
-    endField.classList.toggle('hidden', point() || c.needsDur);
+    endField.classList.toggle('hidden', point() || !!c.oe);   // with c.oe, the card's choice sets the end
   }
   layout();
   const el = h('div', {}, det.el, startField, endField, det.placeField, field('Note', note));
@@ -1342,26 +1475,29 @@ function cardEditor(c, onChange) {
     el,
     read: () => {
       const s = start.input.value === startIn ? o.start_at : iso(start.read());
-      let e;
+      let e = null;
+      c.missing = false;
       if (point()) e = s;
-      else if (c.needsDur) e = null;   // comes from "How long?"
-      else if (end.input.value === endIn) e = o.end_at;
-      else e = end.input.value ? iso(end.read()) : null;
+      else if (!c.oe) {
+        e = endField.endFor(s);
+        if (e === undefined) { c.missing = true; e = null; }   // Ended… with no valid time: Save asks
+      }
       return { kind: o.kind, start_at: s, end_at: e, data: det.get(), note: note.value.trim() };
     },
   };
 }
 
 const clockAt = (t) => `${dayKey(t) === dayKey(Date.now()) ? '' : `${dayLabel(dayKey(t))} `}${fmtTime(t)}`;
-// "2:14 PM · 25m ago" · "Started 1:05 PM · running" · "1:05 PM – 2:40 PM · 1h 35m"
-function timeLine(ev, askDuration) {
+// "2:14 PM · 25m ago" · "Started 1:05 PM · running" · "1:05 PM – 2:40 PM · 1h 35m" · "Started 1:05 PM · no duration"
+function timeLine(ev, askEnd) {
   if (!ev.start_at) return 'Pick a time';
   const a = ms(ev.start_at), now = Date.now();
   if (ev.end_at == null) {
-    if (askDuration) return `Started ${clockAt(a)} · how long?`;
+    if (askEnd) return `Started ${clockAt(a)} · ended when?`;
     return [`Started ${clockAt(a)} · running`, now - a >= 60e3 ? [' · ', h('span', { 'data-since': a }, fmtDur(now - a))] : null];
   }
   if (isPoint(ev)) return `${clockAt(a)} · ${now - a < 60e3 ? 'just now' : `${fmtDur(now - a)} ago`}`;
+  if (noDuration(ev)) return `Started ${clockAt(a)} · no duration`;
   const b = ms(ev.end_at);
   return `${clockAt(a)} – ${dayKey(a) === dayKey(b) ? fmtTime(b) : clockAt(b)} · ${fmtDur(b - a)}`;
 }
@@ -1371,7 +1507,7 @@ function cardLines(c, ev) {
   if (c.p.op === 'update') {
     out.push(...changeLines(c.before, ev));
   } else {
-    out.push(h('div', { class: 'pc-time' }, timeLine(ev, needsDuration(c))));
+    out.push(h('div', { class: 'pc-time' }, timeLine(ev, endMissing(c))));
     const bits = detailBits(ev);
     if (bits.length) out.push(h('div', { class: 'pc-line' }, bits.join(' · ')));
     if (ev.note) out.push(h('div', { class: 'pc-note' }, ev.note));
@@ -1392,24 +1528,26 @@ function changeLines(b, a) {
   const full = (e) => [describe(e), ...detailBits(e)].join(' · ');
   if (full(b) !== full(a)) line(`${full(b)} → ${full(a)}`);
   if (a.start_at !== b.start_at) line(`Start ${clockAt(ms(b.start_at))} → ${a.start_at ? clockAt(ms(a.start_at)) : '?'}`);
-  if (a.end_at !== b.end_at && !isPoint(a) && a.start_at) {
+  if (a.end_at !== b.end_at && !isPoint(a) && a.start_at && !(noDuration(a) && noDuration(b))) {
     const took = a.end_at ? fmtDur(ms(a.end_at) - ms(a.start_at)) : '';
     if (!a.end_at) line('Keep it running (no end time)');
-    else if (!b.end_at) line(`End at ${clockAt(ms(a.end_at))}`, h('span', { class: 'muted' }, ` · ${a.kind === 'sleep' ? 'slept' : 'lasted'} ${took}`));
+    else if (noDuration(a)) line('No duration (end not known)');
+    else if (!b.end_at || noDuration(b)) line(`End at ${clockAt(ms(a.end_at))}`, h('span', { class: 'muted' }, ` · ${a.kind === 'sleep' ? 'slept' : 'lasted'} ${took}`));
     else line(`End ${clockAt(ms(b.end_at))} → ${clockAt(ms(a.end_at))}`, h('span', { class: 'muted' }, ` · ${took}`));
   }
   if ((a.note || '') !== (b.note || '')) out.push(h('div', { class: 'pc-note' }, h('span', { class: 'muted' }, 'Note: '), a.note || '(removed)'));
   if (!out.length) line('No change');
   if (a.start_at === b.start_at) {
     const t = clockAt(ms(b.start_at));
-    out.push(h('div', { class: 'pc-line muted' }, b.end_at == null ? `Running since ${t}` : isPoint(b) ? `At ${t}` : `Started ${t}`));
+    out.push(h('div', { class: 'pc-line muted' }, b.end_at == null ? `Running since ${t}` : isPoint(b) ? `At ${t}`
+      : noDuration(b) ? `Started ${t} · no duration` : `Started ${t}`));
   }
   return out;
 }
 
 function checkProposal(c, ev, many) {
   try {
-    if (needsDuration(c) && !c.mins) throw new Error('How long did it last? Pick a duration.');
+    if (endMissing(c)) throw new Error('When did it end? Pick how long, or the end time.');
     if (!ev.start_at) throw new Error('Pick a valid time');
     checkPast(new Date(ev.start_at));
     if (ev.end_at && ms(ev.end_at) > Date.now() + 60e3) throw new Error('That would end in the future. Pick a shorter time.');
@@ -1444,7 +1582,7 @@ function saveReview(rv) {
       }
       for (const { c, ev } of creates) {
         const data = { ...ev.data, ai: { source: rv.source, model: rv.model, confidence: conf01(c.p.confidence), edited: c.edited } };
-        if (ev.end_at == null) {   // a new running timer: same rule as the Start buttons
+        if (ev.end_at == null) {   // a new running timer ("Still going"): same rule as the Start buttons
           const prev = await endRunning(ev.kind, data.name, ms(ev.start_at));
           if (prev) rv.undo.push(() => patch(prev.id, { end_at: prev.end_at }));
         }
@@ -1463,7 +1601,7 @@ function savedText(saved) {
   if (saved.length !== 1) return `Saved ${saved.length} entries`;
   const { c, r } = saved[0];
   if (c.p.op === 'update') return `Updated: ${describe(r)}`;
-  return `Saved: ${describe(r)}${r.end_at == null ? ' (running)' : ''}${atText(r.start_at)}`;
+  return `Saved: ${describe(r)}${r.end_at == null ? ' (running)' : noDuration(r) ? ' (no duration)' : ''}${atText(r.start_at)}`;
 }
 async function undoAll(steps) {
   let err = null;
